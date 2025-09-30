@@ -40,6 +40,8 @@ backend/dist/*.exe
 ############################################
 # 项目特定
 ############################################
+runtime/python/
+test/
 workspace*/
 gpt_key.json
 logs/

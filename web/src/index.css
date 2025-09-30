@@ -1,0 +1,221 @@
+@import "tailwindcss";
+@plugin '../hero.ts';
+@source '../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}';
+@custom-variant dark (&:is(.dark *));
+
+/* Electron 自定义标题栏样式 */
+/* 主题变量（由应用主题系统控制） */
+:root {
+  --titlebar-bg: #f9fafb; /* gray-50 */
+  --titlebar-fg: #111111;
+  --titlebar-hover: rgba(0,0,0,0.06);
+  --titlebar-danger: #dc2626; /* bg-red-600 */
+}
+.dark {
+  --titlebar-bg: #000000; /* 纯黑色 */
+  --titlebar-fg: #ffffff;
+  --titlebar-hover: rgba(255,255,255,0.12);
+  --titlebar-danger: #dc2626; /* bg-red-600 */
+}
+
+/* 容器与布局 */
+.ttb-bar {
+  background: var(--titlebar-bg);
+  color: var(--titlebar-fg);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* 控制按钮对齐到右侧 */
+  padding: 0 8px;
+  user-select: none;
+  height: 40px;
+  min-height: 40px; /* 确保最小高度，防止闪烁 */
+  flex-shrink: 0; /* 防止被压缩 */
+}
+
+.ttb-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ttb-title {
+  font-size: 12px;
+  opacity: 0.9;
+  font-weight: 500;
+}
+
+.ttb-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* 按钮通用样式 */
+.ttb-btn {
+  width: 46px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--titlebar-fg);
+  cursor: pointer;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+  font-size: 12px;
+  transition: background-color 0.1s ease;
+}
+
+.ttb-btn svg {
+  width: 16px;
+  height: 16px;
+  /* 让SVG图标颜色跟随父元素的color */
+  fill: currentColor;
+}
+
+.ttb-btn svg path {
+  fill: currentColor;
+}
+
+.ttb-btn:hover {
+  background: var(--titlebar-hover);
+}
+
+.ttb-btn:active {
+  transform: translateY(0.5px);
+}
+
+.ttb-btn--unfocused {
+  opacity: 0.6;
+}
+
+/* 关闭按钮高亮 */
+.ttb-close:hover {
+  background: var(--titlebar-danger) !important;
+  color: #ffffff !important;
+}
+
+.ttb-close:active {
+  background: color-mix(in oklch, var(--titlebar-danger) 80%, black) !important;
+  color: #ffffff !important;
+}
+
+/* Electron环境下的布局调整 */
+.electron-app {
+  /* 为自绘标题栏预留空间 */
+}
+
+/* 主题切换时禁用所有过渡动画 - 防止半透明元素不同步 */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* 修复图片缩略图选中描边样式 - 统一2px紧贴边缘 */
+.thumbnail-card-selected {
+  box-shadow: 0 0 0 2px rgb(59 130 246) !important; /* ring-2 ring-blue-500 的等效实现 */
+}
+
+.thumbnail-card-hover:hover {
+  box-shadow: 0 0 0 1px rgb(209 213 219) !important; /* ring-1 ring-gray-300 */
+}
+
+.dark .thumbnail-card-hover:hover {
+  box-shadow: 0 0 0 1px rgb(75 85 99) !important; /* dark:ring-gray-600 */
+}
+
+/* 响应式图片网格 - 基于容器宽度自动调整列数 */
+.responsive-thumbnail-grid {
+  display: grid;
+  gap: 0.75rem; /* gap-3 */
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+}
+
+/* 当容器宽度小于220px时强制单列 */
+@container (max-width: 219px) {
+  .responsive-thumbnail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Chrome / Edge / Safari */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* 滚动条淡入样式（保留空间，避免布局跳动；隐藏箭头） */
+.scrollbar-fade {
+  /* 始终预留滚动条沟槽，避免出现/消失导致布局抖动 */
+  scrollbar-gutter: stable both-edges;
+
+  /* Firefox：使用细滚动条，默认颜色透明（看不见，但仍保留空间） */
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  /* WebKit 颜色变量（在不同主题下复用） */
+  --sb-thumb: rgba(0, 0, 0, 0.35);
+}
+.scrollbar-fade:hover,
+.scrollbar-fade[data-scrolling="true"] {
+  /* Firefox 悬浮/滚动时显示颜色 */
+  scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
+}
+.dark .scrollbar-fade:hover,
+.dark .scrollbar-fade[data-scrolling="true"] {
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
+}
+.dark .scrollbar-fade { --sb-thumb: rgba(255, 255, 255, 0.35); }
+
+/* WebKit：始终保留宽度，默认拇指透明，悬浮/滚动时着色 */
+.scrollbar-fade::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-fade::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-fade::-webkit-scrollbar-thumb {
+  background-color: var(--sb-thumb);
+  border-radius: 6px;
+  opacity: 0; /* 默认透明（保留空间） */
+  transition: opacity 150ms ease;
+}
+.scrollbar-fade:hover::-webkit-scrollbar-thumb,
+.scrollbar-fade[data-scrolling="true"]::-webkit-scrollbar-thumb {
+  opacity: 1; /* 悬浮或滚动时淡入 */
+}
+/* 隐藏两端箭头（旧版 WebKit） */
+.scrollbar-fade::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+}
+/* 通用：隐藏原生滚动条（用于自定义滚动条） */
+.no-native-scrollbar { scrollbar-width: none; }
+.no-native-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
+
+/* 自定义 ScrollArea 覆盖拇指（与 .dark 变量共用颜色） */
+.scrollarea { --sb-thumb: rgba(0,0,0,0.35); }
+.dark .scrollarea { --sb-thumb: rgba(255,255,255,0.35); }
+.scrollarea .sa-thumb {
+  position: absolute;
+  top: 0; right: 2px;
+  width: 6px;
+  border-radius: 3px;
+  background: var(--sb-thumb);
+  opacity: 0;
+  transition: opacity 150ms ease;
+  pointer-events: none; /* 纯显示，不拦截事件 */
+}
+.scrollarea:hover .sa-thumb,
+.scrollarea[data-scrolling="true"] .sa-thumb { opacity: 1; }

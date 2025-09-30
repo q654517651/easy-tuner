@@ -1,0 +1,105 @@
+{
+  "model_paths": {
+    "qwen_image": {
+      "dit_path": "",
+      "vae_path": "",
+      "text_encoder_path": ""
+    },
+    "flux": {
+      "dit_path": "",
+      "vae_path": "",
+      "text_encoder_path": "",
+      "clip_path": ""
+    },
+    "stable_diffusion": {
+      "unet_path": "",
+      "vae_path": "",
+      "text_encoder_path": "",
+      "clip_path": ""
+    }
+  },
+  "labeling": {
+    "default_prompt": "请详细描述这张图片的内容，包括主要物体、颜色、场景、风格等。",
+    "translation_prompt": "请将以下英文标注翻译成中文：",
+    "selected_model": "lm_studio",
+    "delay_between_calls": 2.0,
+    "models": {
+      "gpt": {
+        "enabled": false,
+        "api_key": "",
+        "base_url": "https://api.openai.com/v1",
+        "model_name": "gpt-4o",
+        "supports_video": false,
+        "max_tokens": 2000,
+        "temperature": 0.7
+      },
+      "lm_studio": {
+        "enabled": true,
+        "api_key": "",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "model_name": "local-model",
+        "supports_video": true,
+        "max_tokens": 2000,
+        "temperature": 0.7
+      },
+      "local_qwen_vl": {
+        "enabled": false,
+        "api_key": "",
+        "base_url": "http://127.0.0.1:8000/v1",
+        "model_name": "qwen-vl",
+        "supports_video": true,
+        "max_tokens": 2000,
+        "temperature": 0.7
+      }
+    }
+  },
+  "training": {
+    "default_epochs": 16,
+    "default_batch_size": 2,
+    "default_learning_rate": 0.0001,
+    "default_resolution": "1024,1024",
+    "memory_presets": {
+      "low": {
+        "fp8_base": true,
+        "fp8_scaled": true,
+        "blocks_to_swap": 45
+      },
+      "medium": {
+        "fp8_base": true,
+        "fp8_scaled": true,
+        "blocks_to_swap": 16
+      },
+      "high": {
+        "fp8_base": false,
+        "fp8_scaled": false,
+        "blocks_to_swap": 0
+      }
+    }
+  },
+  "musubi": {
+    "git_repository": "https://github.com/kohya-ss/musubi-tuner.git",
+    "git_branch": "main",
+    "installation_path": "./runtime/engines/musubi-tuner",
+    "status": "unknown",
+    "version": "",
+    "last_check": ""
+  },
+  "storage": {
+    "workspace_root": "E:\\Program\\programlearn\\tagtragger\\workspace",
+    "datasets_dir": "datasets",
+    "cache_dir": "cache",
+    "models_dir": "models",
+    "medium_max_side": 1280,
+    "preview_max_side": 512
+  },
+  "ui": {
+    "theme_mode": "light",
+    "window_width": 1400,
+    "window_height": 900,
+    "cards_per_row": 4
+  },
+  "logging": {
+    "log_batch_lines": 25,
+    "log_batch_interval": 0.5
+  }
+}

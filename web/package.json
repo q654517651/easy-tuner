@@ -1,0 +1,100 @@
+{
+  "name": "web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:web": "vite build",
+    "build:app": "tsc -p electron/tsconfig.json",
+    "build": "pnpm build:web && pnpm build:app",
+    "debug:prod": "pnpm build && electron .",
+    "dist": "pnpm build && electron-builder",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@heroui/react": "^2.8.4",
+    "@heroui/toast": "^2.0.16",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.23.13",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.8.2",
+    "uplot": "^1.6.32",
+    "uplot-react": "^1.2.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.33.0",
+    "@heroui/theme": "^2.4.22",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.21",
+    "electron": "^38.1.2",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.33.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "npm-run-all": "^4.1.5",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.0.0",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.39.1",
+    "vite": "^7.1.2",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-svgr": "^4.5.0"
+  },
+  "build": {
+    "appId": "com.easytuner.app",
+    "productName": "EasyTuner",
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "asar": true,
+    "icon": "src/assets/app_icon/AppIcon.png",
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "src/assets/app_icon/AppIcon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "icon": "src/assets/app_icon/AppIcon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "src/assets/app_icon/AppIcon.png"
+    },
+    "extraResources": [
+      { "from": "../backend/dist/EasyTunerBackend.exe", "to": "backend/EasyTunerBackend.exe" },
+      {
+        "from": "../runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*",
+          "!python/**",
+          "!python"
+        ]
+      }
+    ]
+  }
+}
