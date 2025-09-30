@@ -1,0 +1,90 @@
+############################################
+# OS 常见文件
+############################################
+.DS_Store
+Thumbs.db
+
+############################################
+# 根目录产物（Electron Builder / 打包）
+############################################
+dist/
+
+############################################
+# Python / 后端
+############################################
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.tox/
+.pyre/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# 后端打包产物（PyInstaller）
+backend/build/
+backend/dist/
+backend/*.spec
+backend/dist/*.exe
+
+############################################
+# 项目特定
+############################################
+workspace*/
+gpt_key.json
+logs/
+.claude/
+build/
+temp_*.txt
+temp_*.json
+
+############################################
+# Web 前端
+############################################
+web/node_modules/
+web/dist/
+web/dist-electron/
+web/.next/
+web/.eslintcache
+web/.turbo
+web/.parcel-cache
+web/.env.local
+
+############################################
+# 环境变量文件（保留示例）
+############################################
+.env
+.env.*
+!.env.example
+web/.env.*
+!web/.env.example
+
+############################################
+# IDE / 编辑器
+############################################
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+
+############################################
+# 日志与临时文件
+############################################
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+
