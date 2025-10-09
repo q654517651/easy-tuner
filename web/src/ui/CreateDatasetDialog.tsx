@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button, Input, Select, SelectItem, Textarea } from '@heroui/react';
+import { fetchJson } from '../services/api';
+import { useReadiness } from '../contexts/ReadinessContext';
+import { readinessApi } from '../services/api';
 
 interface CreateDatasetDialogProps {
   isOpen: boolean;
@@ -18,12 +21,7 @@ export default function CreateDatasetDialog({ isOpen, onClose, onSubmit }: Creat
   useEffect(() => {
     const fetchDatasetTypes = async () => {
       try {
-        const response = await fetch('/api/v1/datasets/types');
-        if (!response.ok) {
-          console.error('Failed to fetch dataset types:', response.status);
-          return;
-        }
-        const result = await response.json();
+        const result = await fetchJson<any>('/datasets/types');
         if (result.success && result.data) {
           setDatasetTypes(result.data);
           // 设置默认选中第一个类型

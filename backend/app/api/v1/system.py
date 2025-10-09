@@ -164,13 +164,36 @@ def _path_writable(p: Path) -> bool:
 async def workspace_status():
     try:
         cfg = get_config()
-        root = Path(cfg.storage.workspace_root).resolve()
+        workspace_root = cfg.storage.workspace_root
+
+        # 判断是否未设置（仍为默认相对路径）
+        if not workspace_root or workspace_root.strip() in ('.', './workspace', 'workspace', ''):
+            return DataResponse(data={
+                'path': workspace_root or '',
+                'exists': False,
+                'writable': False,
+                'reason': 'NOT_SET',
+            }, message="工作区未设置")
+
+        # 已设置，解析为绝对路径进行检查
+        root = Path(workspace_root).resolve()
         exists = root.exists()
-        writable = _path_writable(root) if exists else False
+
+        if not exists:
+            reason = "NOT_FOUND"
+            writable = False
+        elif not _path_writable(root):
+            reason = "NOT_WRITABLE"
+            writable = False
+        else:
+            reason = "OK"
+            writable = True
+
         return DataResponse(data={
             'path': str(root),
             'exists': exists,
             'writable': writable,
+            'reason': reason,
         }, message="工作区状态")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取工作区状态失败: {str(e)}")
@@ -180,17 +203,30 @@ async def workspace_status():
 async def select_workspace(payload: dict = Body(...)):
     new_path = (payload or {}).get('path')
     if not new_path or not str(new_path).strip():
-        raise HTTPException(status_code=400, detail="无效的工作区路径")
-    root = Path(new_path).resolve()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"无法创建工作区目录: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "HTTPError", "error_code": "INVALID_PATH", "message": "无效的工作区路径"}
+        )
 
-    # 更新配置并保存
-    cfg = get_config()
-    cfg.storage.workspace_root = str(root)
-    save_config(cfg)
+    root = Path(new_path).resolve()
+
+    # 检查目录是否存在（不自动创建）
+    if not root.exists():
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "HTTPError", "error_code": "NOT_FOUND", "message": f"目录不存在: {root}"}
+        )
+
+    # 检查是否可写
+    if not _path_writable(root):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "HTTPError", "error_code": "NOT_WRITABLE", "message": f"目录无写入权限: {root}"}
+        )
+
+    # 更新环境管理器中的workspace路径（会自动保存配置）
+    from ...core.environment import get_env_manager
+    get_env_manager().update_workspace(str(root))
 
     # 动态更新静态目录挂载
     try:
@@ -204,7 +240,7 @@ async def select_workspace(payload: dict = Body(...)):
     tm_ok = False
     dm_ok = False
     try:
-        from ...core.training.manager_new import get_training_manager
+        from ...core.training.manager import get_training_manager
         tm = get_training_manager()
         if hasattr(tm, 'update_workspace'):
             tm_ok = bool(tm.update_workspace(str(root)))
@@ -221,18 +257,38 @@ async def select_workspace(payload: dict = Body(...)):
         logging.exception("更新数据集工作区失败")
 
     ready = bool(tm_ok and dm_ok)
-    return DataResponse(data={'path': str(root), 'ready': ready, 'tasks_loaded': tm_ok, 'datasets_loaded': dm_ok}, message="工作区已设置")
+    return DataResponse(
+        data={
+            'path': str(root),
+            'ready': ready,
+            'tasks_loaded': tm_ok,
+            'datasets_loaded': dm_ok,
+            'reason': 'OK'
+        },
+        message="工作区已设置"
+    )
 
 
 @router.get("/system/runtime/status", response_model=DataResponse[dict])
 async def runtime_status():
-    run_root = Path(os.getcwd())
-    runtime_dir = run_root / 'runtime'
-    py_exe = runtime_dir / 'python' / ('python.exe' if os.name == 'nt' else 'python')
-    engines_dir = runtime_dir / 'engines'
+    from ...core.environment import get_paths
+
+    paths = get_paths()
+    python_ok = paths.runtime_python_exists
+    engines_ok = paths.engines_dir.exists()
+
+    # 判断 reason
+    if not python_ok:
+        reason = "PYTHON_MISSING"
+    elif not engines_ok:
+        reason = "ENGINES_MISSING"
+    else:
+        reason = "OK"
+
     return DataResponse(data={
-        'cwd': str(run_root),
-        'runtime_path': str(runtime_dir),
-        'python_present': py_exe.exists(),
-        'engines_present': engines_dir.exists(),
+        'cwd': str(paths.project_root),
+        'runtime_path': str(paths.runtime_dir),
+        'python_present': python_ok,
+        'engines_present': engines_ok,
+        'reason': reason,
     }, message="运行时状态")

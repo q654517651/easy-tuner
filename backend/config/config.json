@@ -1,12 +1,12 @@
 {
   "model_paths": {
     "qwen_image": {
-      "dit_path": "",
-      "vae_path": "",
-      "text_encoder_path": ""
+      "dit_path": "qwen-image testqqq",
+      "vae_path": "2131312",
+      "text_encoder_path": "12312331312"
     },
     "flux": {
-      "dit_path": "",
+      "dit_path": "kontext-ditdd",
       "vae_path": "",
       "text_encoder_path": "",
       "clip_path": ""
@@ -16,19 +16,54 @@
       "vae_path": "",
       "text_encoder_path": "",
       "clip_path": ""
+    },
+    "qwen_image_edit": {
+      "dit_path": "qwen-image edit test",
+      "vae_path": "2131312",
+      "text_encoder_path": "12312331312"
+    },
+    "Wan_2": {
+      "1": {
+        "dit_path": "wan2.1 dit",
+        "text_encoder_path": "wan t5"
+      },
+      "2": {
+        "dit_path": "wan 2.2dit"
+      }
+    },
+    "Wan_2_1": {
+      "text_encoder_path": "wan t5",
+      "dit_path": "wan2.1 dit",
+      "vae_path": "1111",
+      "t5_path": "1111111"
+    },
+    "Wan_2_2": {
+      "dit_path": "wan 2.2 dit",
+      "vae_path": "1111"
+    },
+    "_groups": {
+      "qwen": {
+        "vae_path": "qqqqq"
+      }
+    },
+    "flux_kontext": {
+      "text_encoder2_path": "111",
+      "vae_path": "111",
+      "dit_path": "1111",
+      "text_encoder1_path": "111"
     }
   },
   "labeling": {
-    "default_prompt": "请详细描述这张图片的内容，包括主要物体、颜色、场景、风格等。",
+    "default_prompt": "图中的角色是“qbao”，请以qbao正在xxx,描述画面，注意简洁清晰 不要描述风格",
     "translation_prompt": "请将以下英文标注翻译成中文：",
     "selected_model": "lm_studio",
     "delay_between_calls": 2.0,
     "models": {
       "gpt": {
         "enabled": false,
-        "api_key": "",
-        "base_url": "https://api.openai.com/v1",
-        "model_name": "gpt-4o",
+        "api_key": "sk-f4gLq2Ok2MWEqZmOE9494063591a4bC4A91d872fAfF5A843",
+        "base_url": "https://api.vveai.com/v1",
+        "model_name": "gpt-5-mini",
         "supports_video": false,
         "max_tokens": 2000,
         "temperature": 0.7
@@ -36,7 +71,7 @@
       "lm_studio": {
         "enabled": true,
         "api_key": "",
-        "base_url": "http://127.0.0.1:1234/v1",
+        "base_url": "http://127.0.0.1:8888/v1",
         "model_name": "local-model",
         "supports_video": true,
         "max_tokens": 2000,
@@ -49,7 +84,8 @@
         "model_name": "qwen-vl",
         "supports_video": true,
         "max_tokens": 2000,
-        "temperature": 0.7
+        "temperature": 0.7,
+        "weights_path": "D:\\AI\\Qwen-model\\qwen_2.5_vl_7b.safetensors"
       }
     }
   },

@@ -16,6 +16,7 @@ const CreateTask = lazy(() => import("./pages/CreateTask"));
 const SettingsPage = lazy(() => import("./pages/Settings"));
 const TaskDetail = lazy(() => import("./pages/TaskDetail"));
 const EmptyStatePage = lazy(() => import("./pages/EmptyState"));
+const UITest = lazy(() => import("./pages/UITest"));
 function ErrorFallback() {
   return (
     <div className="h-full flex items-center justify-center p-10">
@@ -53,12 +54,7 @@ const initializeLanguage = () => {
   // 这个函数会在I18nProvider初始化时被调用
   // 主要作用是在Electron环境中可能需要额外的系统语言检测
   try {
-    const isElectron = window.electronAPI !== undefined;
-    if (isElectron) {
-    // 静默
-    } else {
-    // 静默
-    }
+    // 静默初始化，无需检测环境
   } catch (error) {
     console.warn('[Language] 语言初始化失败:', error);
   }
@@ -68,19 +64,12 @@ const initializeLanguage = () => {
 initializeTheme();
 initializeLanguage();
 
-// 优先通过 process.versions.electron 检测是否为 Electron 渲染进程，必要时回退
-const isElectron = (() => {
-  try {
-    const anyProcess: any = typeof process !== 'undefined' ? (process as any) : undefined;
-    if (anyProcess?.versions?.electron) return true; // 最可靠：Electron 注入的版本信息
-    // 其次：预加载脚本暴露的桥接对象（本项目已使用）
-    if ((window as any).electronAPI) return true;
-    // 最后回退：开发态部分环境中的 UA 识别
-    return navigator.userAgent.includes('Electron');
-  } catch {
-    return false;
-  }
-})();
+// 使用统一的平台检测工具
+import { isElectron } from './utils/platform';
+
+// 兼容：导出为常量（用于路由选择）
+const isElectronEnv = isElectron();
+
 const routes = [
   {
     path: "/",
@@ -93,6 +82,23 @@ const routes = [
         element: (
           <Suspense fallback={<PageLoadingFallback />}>
             <DatasetsList />
+          </Suspense>
+        )
+      },
+      {
+        path: "/ui", // ensure absolute child; if not found, add relative fallback below
+        element: (
+          <Suspense fallback={<PageLoadingFallback />}>
+            <UITest />
+          </Suspense>
+        )
+      },
+      // 兼容：相对路径写法，某些路由器版本对子路由更友好
+      {
+        path: "ui",
+        element: (
+          <Suspense fallback={<PageLoadingFallback />}>
+            <UITest />
           </Suspense>
         )
       },
@@ -149,7 +155,7 @@ const routes = [
   },
 ];
 
-const router = (isElectron ? createHashRouter : createBrowserRouter)(routes);
+const router = (isElectronEnv ? createHashRouter : createBrowserRouter)(routes);
 
 createRoot(document.getElementById("root")!).render(
   <I18nProvider>

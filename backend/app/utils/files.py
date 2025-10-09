@@ -1,63 +1,62 @@
 """
-文件处理工具
+文件访问工具
 """
 
 import mimetypes
 from pathlib import Path
-from typing import Optional
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 
 class FileUtils:
-    """文件处理工具类"""
+    """文件访问工具集"""
 
     @staticmethod
     def validate_task_file_path(task_id: str, subpath: str) -> Path:
-        """验证并解析任务文件路径，防止目录穿越"""
-        task_root = Path(f"workspace/tasks/{task_id}")
-        output_root = task_root / "output"
+        """校验任务文件相对路径，防止目录穿越，并返回绝对路径。
 
-        # 解析目标路径
-        target_path = output_root / subpath
+        - 允许 subpath 含多级子目录（如 'output/sample/xxx.png')
+        - 统一将反斜杠替换为正斜杠，并去掉前导斜杠
+        - 仅允许访问 task 根目录下的文件
+        """
+        task_root = Path("workspace") / "tasks" / task_id
+        safe_rel = (subpath or "").replace("\\", "/").lstrip("/")
+
         try:
-            resolved_path = target_path.resolve()
+            file_path = (task_root / safe_rel).resolve()
         except (OSError, ValueError):
             raise HTTPException(status_code=400, detail="无效的文件路径")
 
-        # 安全检查：必须在output目录内
+        # 安全校验：必须位于任务根目录内
         try:
-            resolved_path.relative_to(output_root.resolve())
+            file_path.relative_to(task_root.resolve())
         except ValueError:
-            raise HTTPException(status_code=403, detail="禁止访问该路径")
+            raise HTTPException(status_code=403, detail="禁止访问超出任务目录的路径")
 
-        if not resolved_path.exists():
+        if not file_path.exists() or not file_path.is_file():
             raise HTTPException(status_code=404, detail="文件不存在")
 
-        return resolved_path
+        return file_path
 
     @staticmethod
     def create_file_response(file_path: Path) -> StreamingResponse:
-        """创建简单的文件响应"""
+        """创建文件响应（图片 inline，其它附件下载）"""
         content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
 
-        # 图片显示为inline，其他文件为附件
-        if file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']:
+        if file_path.suffix.lower() in [".png", ".jpg", ".jpeg", ".webp"]:
             disposition = "inline"
         else:
             disposition = f'attachment; filename="{file_path.name}"'
 
-        headers = {
-            "Content-Disposition": disposition,
-        }
+        headers = {"Content-Disposition": disposition}
 
         def file_stream():
             with open(file_path, "rb") as f:
-                while chunk := f.read(8192):
+                while True:
+                    chunk = f.read(8192)
+                    if not chunk:
+                        break
                     yield chunk
 
-        return StreamingResponse(
-            file_stream(),
-            headers=headers,
-            media_type=content_type
-        )
+        return StreamingResponse(file_stream(), headers=headers, media_type=content_type)
+

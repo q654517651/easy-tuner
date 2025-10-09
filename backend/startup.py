@@ -3,7 +3,13 @@
 EasyTuner FastAPI 后端启动脚本
 """
 
+# ---- Windows 事件循环策略设置（必须在最开始） ----
 import sys
+if sys.platform == 'win32':
+    import asyncio
+    # 使用 ProactorEventLoop 以支持子进程（create_subprocess_exec）
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 import os
 import uvicorn
 from pathlib import Path
@@ -16,16 +22,19 @@ sys.path.insert(0, str(project_root / "backend"))
 
 def main():
     """启动FastAPI服务器"""
-    
+
     # 设置环境变量
     os.environ.setdefault("PYTHONPATH", str(project_root))
-    
-    # 启动服务器
+
+    # 导入 app 对象（这会执行 app.__init__.py 中的策略设置）
+    from app.main import app
+
+    # 启动服务器（传递对象而非字符串）
     uvicorn.run(
-        "app.main:app",
+        app,  # 直接传递 app 对象，确保策略在主进程和子进程中都生效
         host="127.0.0.1",
         port=8000,
-        reload=True,
+        reload=False,
         reload_dirs=[str(Path(__file__).parent)],
         log_level="info",
         access_log=True,

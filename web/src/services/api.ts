@@ -1,31 +1,98 @@
 // src/services/api.ts
-// 统一 API 基址：优先 VITE_API_BASE，其次按开发环境兜底到 127.0.0.1:8000
-const RAW_BASE = (import.meta as any)?.env?.VITE_API_BASE as string | undefined;
+// 统一 API 基址解析：
+// 优先级：VITE_API_BASE -> VITE_API_BASE_URL -> window.__API_BASE__ -> 动态端口 -> 127.0.0.1:8000
+const RAW_BASE =
+  ((import.meta as any)?.env?.VITE_API_BASE as string | undefined) ||
+  ((import.meta as any)?.env?.VITE_API_BASE_URL as string | undefined) ||
+  (typeof window !== 'undefined' ? (window as any).__API_BASE__ : undefined);
+
 const inferDefaultOrigin = () => {
   try {
+    // 优先使用 Electron 注入的动态端口
+    if (typeof window !== 'undefined' && (window as any).__BACKEND_PORT__) {
+      const port = (window as any).__BACKEND_PORT__;
+      return `http://127.0.0.1:${port}`;
+    }
+
     if (typeof location !== 'undefined' && location.protocol.startsWith('http')) {
       return `${location.protocol}//127.0.0.1:8000`;
     }
   } catch {}
   return 'http://127.0.0.1:8000';
 };
-export const API_ORIGIN = (RAW_BASE && RAW_BASE.trim().length > 0)
-  ? RAW_BASE.replace(/\/+$/,'')
-  : inferDefaultOrigin();
-export const API_BASE_URL = `${API_ORIGIN}/api/v1`;
+
+// 调试开关（动态检查）
+const isDebugApi = () => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('DEBUG_API') === '1';
+  } catch {
+    return false;
+  }
+};
+
+// 导出动态 getter，而非静态常量
+export const getApiOrigin = (): string => {
+  const backendPort = (window as any).__BACKEND_PORT__;
+  const debug = isDebugApi();
+
+  if (debug) {
+    console.log('[API] 获取 API Origin - __BACKEND_PORT__:', backendPort, 'RAW_BASE:', RAW_BASE);
+  }
+
+  if (RAW_BASE && RAW_BASE.trim().length > 0) {
+    if (debug) console.log('[API] 使用 RAW_BASE:', RAW_BASE);
+    return RAW_BASE.replace(/\/+$/,'');
+  }
+  const origin = inferDefaultOrigin();
+  if (debug) console.log('[API] 使用推断的 Origin:', origin);
+  return origin;
+};
+
+export const getApiBaseUrl = (): string => {
+  const baseUrl = `${getApiOrigin()}/api/v1`;
+  if (isDebugApi()) console.log('[API] API Base URL:', baseUrl);
+  return baseUrl;
+};
+
+// 兼容旧代码：导出静态常量（初始值）
+export const API_ORIGIN = getApiOrigin();
+export const API_BASE_URL = getApiBaseUrl();
 
 // 将相对/绝对 URL 规范化为基于 API_ORIGIN 的绝对 URL
 export const joinApiUrl = (u: string | URL | null | undefined): string => {
   try {
-    if (!u) return API_ORIGIN + "/";
+    const origin = getApiOrigin();
+    if (!u) return origin + "/";
     // 若已是 URL 对象或绝对 URL，new URL 会原样返回；相对路径将基于 API_ORIGIN 拼接
     const raw = typeof u === 'string' ? u : u.toString();
-    return new URL(raw, API_ORIGIN.replace(/\/+$/, '/') + '').toString();
+    return new URL(raw, origin.replace(/\/+$/, '/') + '').toString();
   } catch {
     // 兜底：返回原始字符串
     return String(u ?? '');
   }
 };
+
+// --- 统一请求封装 ---
+export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  const url = `${getApiBaseUrl()}${p}`;
+  const res = await fetch(url, { ...(init || {}) });
+  if (!res.ok) {
+    let msg = '';
+    try { msg = await res.text(); } catch {}
+    throw new Error(`HTTP ${res.status}${msg ? ' ' + msg : ''}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function postJson<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+  return fetchJson<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    ...init,
+  });
+}
 
 interface DatasetBrief {
   id: string;
@@ -74,7 +141,7 @@ export const datasetApi = {
   // 获取数据集列表
   async listDatasets(page: number = 1, pageSize: number = 50): Promise<{ data: DatasetBrief[]; total: number }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets?page=${page}&page_size=${pageSize}`);
+      const response = await fetch(`${getApiBaseUrl()}/datasets?page=${page}&page_size=${pageSize}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -92,7 +159,7 @@ export const datasetApi = {
   // 获取数据集详情
   async getDataset(id: string): Promise<DatasetDetail | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets/${id}`);
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${id}`);
       if (!response.ok) {
         if (response.status === 404) {
           return null;
@@ -110,7 +177,7 @@ export const datasetApi = {
   // 创建数据集
   async createDataset(data: { name: string; type: string; description?: string }): Promise<DatasetBrief | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets`, {
+      const response = await fetch(`${getApiBaseUrl()}/datasets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -140,7 +207,7 @@ export const datasetApi = {
         formData.append('files', file);
       });
 
-      const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/upload`, {
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${datasetId}/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -160,7 +227,7 @@ export const datasetApi = {
   // 更新媒体文件标注
   async updateMediaCaption(datasetId: string, filename: string, caption: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/media/${encodeURIComponent(filename)}/caption`, {
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${datasetId}/media/${encodeURIComponent(filename)}/caption`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -182,7 +249,7 @@ export const datasetApi = {
   // 删除媒体文件
   async deleteMediaFile(datasetId: string, filename: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/media/${encodeURIComponent(filename)}`, {
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${datasetId}/media/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
       });
 
@@ -200,7 +267,7 @@ export const datasetApi = {
   // 删除数据集
   async deleteDataset(id: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets/${id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${id}`, {
         method: 'DELETE',
       });
 
@@ -218,7 +285,7 @@ export const datasetApi = {
   // 重命名数据集
   async renameDataset(id: string, data: { name: string }): Promise<DatasetDetail | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets/${id}/rename`, {
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${id}/rename`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -241,7 +308,7 @@ export const datasetApi = {
   // 获取数据集标签统计
   async getDatasetTagStats(id: string): Promise<Array<{ tag: string; count: number; images: string[] }>> {
     try {
-      const response = await fetch(`${API_BASE_URL}/datasets/${id}/tags/stats`);
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${id}/tags/stats`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -259,7 +326,7 @@ export const trainingApi = {
   // 获取训练模型列表
   async getTrainingModels(): Promise<any[]> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/models`);
+      const response = await fetch(`${getApiBaseUrl()}/training/models`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -274,7 +341,7 @@ export const trainingApi = {
   // 获取训练配置模式
   async getTrainingConfigSchema(trainingType: string): Promise<any> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/config/${trainingType}`);
+      const response = await fetch(`${getApiBaseUrl()}/training/config/${trainingType}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -294,20 +361,30 @@ export const trainingApi = {
     output_dir: string;
   }): Promise<any> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/preview-cli`, {
+      const url = `${getApiBaseUrl()}/training/preview-cli`;
+      console.log('[API] 预览 CLI 请求 URL:', url);
+      console.log('[API] 预览 CLI 请求数据:', data);
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(data),
       });
+
+      console.log('[API] 预览 CLI 响应状态:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('[API] 预览 CLI 错误响应:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
       }
       const result = await response.json();
+      console.log('[API] 预览 CLI 结果:', result);
       return result.data;
     } catch (error) {
-      console.error('生成CLI预览失败:', error);
+      console.error('[API] 生成CLI预览失败:', error);
       throw error;
     }
   },
@@ -315,7 +392,7 @@ export const trainingApi = {
   // 获取训练任务列表
   async listTasks(): Promise<any[]> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks`);
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -330,7 +407,7 @@ export const trainingApi = {
   // 获取训练任务详情
   async getTask(id: string): Promise<any | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${id}`);
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${id}`);
       if (!response.ok) {
         if (response.status === 404) {
           return null;
@@ -353,7 +430,7 @@ export const trainingApi = {
     config: Record<string, any>;
   }): Promise<string | null> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks`, {
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -374,7 +451,7 @@ export const trainingApi = {
   // 开始训练任务
   async startTask(id: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${id}/start`, {
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${id}/start`, {
         method: 'POST',
       });
       if (!response.ok) {
@@ -390,7 +467,7 @@ export const trainingApi = {
   // 停止训练任务
   async stopTask(id: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${id}/stop`, {
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${id}/stop`, {
         method: 'POST',
       });
       if (!response.ok) {
@@ -406,7 +483,7 @@ export const trainingApi = {
   // 删除训练任务
   async deleteTask(id: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${id}`, {
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${id}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -422,7 +499,7 @@ export const trainingApi = {
   // 刷新任务文件列表
   async refreshTaskFiles(taskId: string): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${taskId}/refresh`, {
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${taskId}/refresh`, {
         method: 'POST',
       });
       if (!response.ok) {
@@ -438,7 +515,7 @@ export const trainingApi = {
   // 获取任务采样图片列表
   async getTaskSamples(taskId: string): Promise<Array<{ filename: string; url: string }>> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${taskId}/samples`);
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${taskId}/samples`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -453,7 +530,7 @@ export const trainingApi = {
   // 获取任务模型文件列表
   async getTaskArtifacts(taskId: string): Promise<Array<{ filename: string; url: string }>> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${taskId}/artifacts`);
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${taskId}/artifacts`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -468,7 +545,7 @@ export const trainingApi = {
   // 获取训练指标数据（Loss和学习率曲线）
   async getTrainingMetrics(taskId: string): Promise<any> {
     try {
-      const response = await fetch(`${API_BASE_URL}/training/tasks/${taskId}/metrics`);
+      const response = await fetch(`${getApiBaseUrl()}/training/tasks/${taskId}/metrics`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -486,7 +563,7 @@ export const settingsApi = {
   // 获取设置
   async getSettings(): Promise<any> {
     try {
-      const response = await fetch(`${API_BASE_URL}/settings`);
+      const response = await fetch(`${getApiBaseUrl()}/settings`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -501,7 +578,7 @@ export const settingsApi = {
   // 更新设置
   async updateSettings(data: any): Promise<boolean> {
     try {
-      const response = await fetch(`${API_BASE_URL}/settings`, {
+      const response = await fetch(`${getApiBaseUrl()}/settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -521,11 +598,45 @@ export const settingsApi = {
   }
 };
 
+// 打标相关类型定义
+export interface LabelingConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'select' | 'file_path' | 'checkbox';
+  required: boolean;
+  default: any;
+  placeholder: string;
+  description: string;
+  options: Array<{ label: string; value: string }>;
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
+export interface LabelingProvider {
+  id: string;
+  name: string;
+  description: string;
+  supports_video: boolean;
+  is_available: boolean;
+  config_fields: LabelingConfigField[];
+}
+
 // 打标相关API
 export const labelingApi = {
+  // 获取所有打标 Provider
+  async getProviders(): Promise<LabelingProvider[]> {
+    const response = await fetch(`${getApiBaseUrl()}/labeling/providers`);
+    if (!response.ok) {
+      throw new Error(`获取打标 Provider 失败: ${response.status}`);
+    }
+    const result = await response.json();
+    return result.data as LabelingProvider[];
+  },
+
   // 单张打标
   async labelSingle(datasetId: string, filename: string, prompt?: string): Promise<{ filename: string; caption: string }> {
-    const response = await fetch(`${API_BASE_URL}/labeling/single`, {
+    const response = await fetch(`${getApiBaseUrl()}/labeling/single`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -566,7 +677,7 @@ interface SystemGPUResponse {
 export const systemApi = {
   // 获取GPU列表（向后兼容）
   async getGPUs(): Promise<{ data: string[] }> {
-    const response = await fetch(`${API_BASE_URL}/system/gpus`);
+    const response = await fetch(`${getApiBaseUrl()}/system/gpus`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -575,7 +686,7 @@ export const systemApi = {
 
   // 获取GPU详细指标
   async getGPUMetrics(): Promise<{ data: SystemGPUResponse }> {
-    const response = await fetch(`${API_BASE_URL}/system/gpus/metrics`);
+    const response = await fetch(`${getApiBaseUrl()}/system/gpus/metrics`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -584,7 +695,7 @@ export const systemApi = {
 
   // 获取指定GPU的指标
   async getGPUById(gpuId: number): Promise<{ data: GPUMetrics }> {
-    const response = await fetch(`${API_BASE_URL}/system/gpus/${gpuId}/metrics`);
+    const response = await fetch(`${getApiBaseUrl()}/system/gpus/${gpuId}/metrics`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -595,15 +706,31 @@ export const systemApi = {
 // 导出GPU相关类型供其他模块使用
 export type { GPUMetrics, SystemGPUResponse };
 
+// 系统就绪状态类型定义
+export interface WorkspaceStatus {
+  path: string;
+  exists: boolean;
+  writable: boolean;
+  reason: 'NOT_SET' | 'NOT_FOUND' | 'NOT_WRITABLE' | 'OK';
+}
+
+export interface RuntimeStatus {
+  cwd: string;
+  runtime_path: string;
+  python_present: boolean;
+  engines_present: boolean;
+  reason: 'PYTHON_MISSING' | 'ENGINES_MISSING' | 'OK';
+}
+
 // 系统就绪状态 API
 export const readinessApi = {
-  async getWorkspaceStatus(): Promise<{ data: { path: string; exists: boolean; writable: boolean } }> {
-    const res = await fetch(`${API_BASE_URL}/system/workspace/status`);
+  async getWorkspaceStatus(): Promise<{ data: WorkspaceStatus }> {
+    const res = await fetch(`${getApiBaseUrl()}/system/workspace/status`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
-  async selectWorkspace(pathStr: string): Promise<{ data: { path: string } }> {
-    const res = await fetch(`${API_BASE_URL}/system/workspace/select`, {
+  async selectWorkspace(pathStr: string): Promise<{ data: { path: string; ready: boolean; tasks_loaded: boolean; datasets_loaded: boolean; reason: string } }> {
+    const res = await fetch(`${getApiBaseUrl()}/system/workspace/select`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: pathStr }),
@@ -611,8 +738,8 @@ export const readinessApi = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
-  async getRuntimeStatus(): Promise<{ data: { cwd: string; runtime_path: string; python_present: boolean; engines_present: boolean } }> {
-    const res = await fetch(`${API_BASE_URL}/system/runtime/status`);
+  async getRuntimeStatus(): Promise<{ data: RuntimeStatus }> {
+    const res = await fetch(`${getApiBaseUrl()}/system/runtime/status`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }

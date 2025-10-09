@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useIsElectron } from "../utils/platform";
 import IconClose from "../assets/icon/icon_close.svg?react";
 import IconMaximize from "../assets/icon/icon_maximize.svg?react";
 import IconMinimize from "../assets/icon/icon_minimize.svg?react";
@@ -6,17 +7,10 @@ import IconMinimize from "../assets/icon/icon_minimize.svg?react";
 export default function TitleBarControls() {
   const [maxed, setMaxed] = React.useState(false);
   const [focused, setFocused] = React.useState(true);
-  // 立即同步检测Electron环境，避免异步设置导致的闪烁
-  const [isElectron, setIsElectron] = React.useState(() =>
-    typeof window !== 'undefined' && window.navigator.userAgent.includes('Electron')
-  );
+  const isElectron = useIsElectron();
 
   React.useEffect(() => {
-    // 检测是否在Electron环境中
-    const electronEnv = window.navigator.userAgent.includes('Electron');
-    setIsElectron(electronEnv);
-
-    if (!electronEnv) return;
+    if (!isElectron) return;
 
     let unsub = () => {};
     (async () => {

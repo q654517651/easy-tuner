@@ -228,15 +228,13 @@ class GitSubmoduleInfo:
 def check_submodule_status(project_root: str = None) -> Dict[str, Any]:
     """检查musubi子模块状态的便捷函数"""
     if project_root is None:
-        # 尝试从当前工作目录推导项目根目录
-        current_dir = Path.cwd()
-        while current_dir.parent != current_dir:
-            if (current_dir / "runtime" / "engines" / "musubi-tuner").exists():
-                project_root = str(current_dir)
-                break
-            current_dir = current_dir.parent
+        # 从环境管理器获取项目根目录
+        from ..core.environment import get_paths
 
-        if project_root is None:
+        try:
+            paths = get_paths()
+            project_root = str(paths.project_root)
+        except Exception:
             return {
                 "status": "error",
                 "message": "无法找到项目根目录"
@@ -249,15 +247,13 @@ def check_submodule_status(project_root: str = None) -> Dict[str, Any]:
 def get_musubi_releases(project_root: str = None, limit: int = 10, force_refresh: bool = False) -> List[Dict[str, Any]]:
     """获取musubi发布历史的便捷函数"""
     if project_root is None:
-        # 尝试从当前工作目录推导项目根目录
-        current_dir = Path.cwd()
-        while current_dir.parent != current_dir:
-            if (current_dir / "runtime" / "engines" / "musubi-tuner").exists():
-                project_root = str(current_dir)
-                break
-            current_dir = current_dir.parent
+        # 从环境管理器获取项目根目录
+        from ..core.environment import get_paths
 
-        if project_root is None:
+        try:
+            paths = get_paths()
+            project_root = str(paths.project_root)
+        except Exception:
             return []
 
     git_info = GitSubmoduleInfo(project_root)
@@ -267,14 +263,13 @@ def get_musubi_releases(project_root: str = None, limit: int = 10, force_refresh
 def clear_musubi_cache(project_root: str = None) -> bool:
     """清除musubi发布历史缓存的便捷函数"""
     if project_root is None:
-        current_dir = Path.cwd()
-        while current_dir.parent != current_dir:
-            if (current_dir / "runtime" / "engines" / "musubi-tuner").exists():
-                project_root = str(current_dir)
-                break
-            current_dir = current_dir.parent
+        # 从环境管理器获取项目根目录
+        from ..core.environment import get_paths
 
-        if project_root is None:
+        try:
+            paths = get_paths()
+            project_root = str(paths.project_root)
+        except Exception:
             return False
 
     git_info = GitSubmoduleInfo(project_root)

@@ -16,7 +16,7 @@ from pathlib import Path
 from ..models.dataset import DatasetBrief, DatasetDetail, DatasetStats, CreateDatasetRequest, UpdateDatasetRequest
 from ..core.dataset.manager import get_dataset_manager
 from ..core.dataset.models import Dataset as CoreDataset, DatasetType
-from ..utils.exceptions import DatasetNotFoundError
+from ..core.exceptions import DatasetNotFoundError
 from ..utils.logger import log_info, log_success, log_error
 
 
@@ -44,9 +44,14 @@ class DatasetService:
     def _convert_core_to_detail(self, core_dataset: CoreDataset, media_page: int = 1, media_page_size: int = 50) -> DatasetDetail:
         """Convert core Dataset to API DatasetDetail model with media items"""
         from ..models.dataset import MediaItem, MediaType
+        from pathlib import Path
+        from ..core.config import get_config
         from datetime import datetime
 
         stats = core_dataset.get_stats()
+
+        # 获取 workspace_root（提前计算，避免循环内重复）
+        workspace_root = Path(get_config().storage.workspace_root).resolve()
 
         # 获取媒体文件列表
         media_items = []
@@ -59,27 +64,29 @@ class DatasetService:
             paginated_items = items_list[start_idx:end_idx]
 
             for filename, item_data in paginated_items:
-                # 使用DatasetManager获取实际文件路径
+                # 使用 DatasetManager 获取实际文件路径
                 actual_file_path = self._dataset_manager.get_dataset_image_path(core_dataset.dataset_id, filename)
+
                 if actual_file_path:
-                    # 将绝对路径转换为相对于 workspace 的路径
-                    from pathlib import Path
-                    workspace_root = Path(actual_file_path).parts
-                    # 找到 'workspace' 在路径中的位置
+                    # 将绝对路径转换为相对于 workspace_root 的路径
                     try:
-                        workspace_index = workspace_root.index('workspace')
-                        relative_path = '/'.join(workspace_root[workspace_index+1:])
-                        file_url = f"/workspace/{relative_path}"
-                        # 缩略图URL暂时使用原图
-                        thumbnail_url = file_url
-                    except ValueError:
-                        # 如果找不到workspace，使用原来的方式
+                        abs_file = Path(actual_file_path).resolve()
+                        rel_file = abs_file.relative_to(workspace_root)
+                        file_url = f"/workspace/{rel_file.as_posix()}"
+                        file_path = rel_file.as_posix()
+                    except Exception as e:
+                        # 兜底：记录错误并使用默认路径
+                        logger.debug(f"Build URL fallback: file={actual_file_path}, err={e}")
                         file_url = f"/workspace/datasets/{core_dataset.dataset_id}/images/{filename}"
-                        thumbnail_url = f"/workspace/datasets/{core_dataset.dataset_id}/medium/{filename}"
+                        file_path = f"datasets/{core_dataset.dataset_id}/images/{filename}"
                 else:
                     # 如果找不到文件，使用默认路径
+                    logger.debug(f"File not found for dataset {core_dataset.dataset_id}, filename {filename}")
                     file_url = f"/workspace/datasets/{core_dataset.dataset_id}/images/{filename}"
-                    thumbnail_url = f"/workspace/datasets/{core_dataset.dataset_id}/medium/{filename}"
+                    file_path = f"datasets/{core_dataset.dataset_id}/images/{filename}"
+
+                # 不再使用缩略图，直接使用原图
+                thumbnail_url = file_url
 
                 # 处理控制图信息（仅用于控制图数据集）
                 control_images = None
@@ -95,7 +102,7 @@ class DatasetService:
                 media_item = MediaItem(
                     id=f"{core_dataset.dataset_id}_{filename}",
                     filename=filename,
-                    file_path=relative_path if actual_file_path else f"datasets/{core_dataset.dataset_id}/images/{filename}",
+                    file_path=file_path,
                     url=file_url,
                     thumbnail_url=thumbnail_url,
                     media_type=MediaType.IMAGE,
@@ -153,24 +160,7 @@ class DatasetService:
         core_datasets = self._dataset_manager.list_datasets()
         return [self._convert_core_to_brief(ds) for ds in core_datasets]
     
-    def update_dataset(self, dataset_id: str, request: UpdateDatasetRequest) -> Tuple[bool, str]:
-        """Update dataset information"""
-        with self._lock:
-            core_dataset = self._dataset_manager.get_dataset(dataset_id)
-            if not core_dataset:
-                return False, f"Dataset {dataset_id} not found"
-
-            # Update basic fields
-            if request.name is not None:
-                success, message = self._dataset_manager.rename_dataset(dataset_id, request.name)
-                if not success:
-                    return False, message
-
-            if request.description is not None:
-                core_dataset.description = request.description
-                core_dataset._update_modified_time()
-
-            return True, f"Dataset '{core_dataset.name}' updated successfully"
+    # Note: 更新数据集接口未暴露且无引用，已移除以简化服务接口。
 
     def rename_dataset(self, dataset_id: str, new_name: str) -> Tuple[bool, str]:
         """重命名数据集"""
@@ -296,31 +286,50 @@ class DatasetService:
     def _format_control_images(self, dataset_id: str, control_image_filenames: List[str]) -> Optional[List[Any]]:
         """格式化已有的控制图信息"""
         from ..models.dataset import ControlImage
+        from pathlib import Path
+        from ..core.config import get_config
 
         if not control_image_filenames:
             return None
 
         try:
-            # 获取数据集的实际信息以构建正确的URL路径
-            dataset_info = self._dataset_manager.datasets.get(dataset_id)
-            if not dataset_info:
-                log_error(f"数据集 {dataset_id} 不存在于内存中")
-                return None
-
-            warehouse_dir = dataset_info['warehouse']
-            warehouse_name = warehouse_dir.name
-            dataset_dir_name = dataset_info['path'].name  # 实际的目录名，如 rlrr9k08--m--ttt
-
+            workspace_root = Path(get_config().storage.workspace_root).resolve()
             control_images = []
+
             for control_filename in control_image_filenames:
-                # 构建正确的URL路径
-                relative_path = f"datasets/{warehouse_name}/{dataset_dir_name}/controls/{control_filename}"
-                control_url = f"/workspace/{relative_path}"
+                # 使用 DatasetManager 获取控制图的实际路径
+                # 注意：这里假设控制图在 controls/ 目录下
+                # 如果 DatasetManager 没有提供获取控制图路径的方法，我们需要手动构建
+                dataset_info = self._dataset_manager.datasets.get(dataset_id)
+                if not dataset_info:
+                    logger.debug(f"数据集 {dataset_id} 不存在于内存中")
+                    continue
+
+                # 获取控制图路径
+                dataset_path = dataset_info['path']
+                control_path = dataset_path / 'controls' / control_filename
+
+                if control_path.exists():
+                    try:
+                        abs_control = control_path.resolve()
+                        rel_control = abs_control.relative_to(workspace_root)
+                        control_url = f"/workspace/{rel_control.as_posix()}"
+                    except Exception as e:
+                        logger.debug(f"Build control URL fallback: file={control_path}, err={e}")
+                        # 兜底逻辑
+                        warehouse_name = dataset_info['warehouse'].name
+                        dataset_dir_name = dataset_path.name
+                        control_url = f"/workspace/datasets/{warehouse_name}/{dataset_dir_name}/controls/{control_filename}"
+                else:
+                    # 文件不存在，使用默认路径
+                    warehouse_name = dataset_info['warehouse'].name
+                    dataset_dir_name = dataset_path.name
+                    control_url = f"/workspace/datasets/{warehouse_name}/{dataset_dir_name}/controls/{control_filename}"
 
                 control_images.append(ControlImage(
                     filename=control_filename,
                     url=control_url,
-                    thumbnail_url=control_url
+                    thumbnail_url=control_url  # 不再使用缩略图
                 ))
 
             control_images.sort(key=lambda x: x.filename)
@@ -334,6 +343,7 @@ class DatasetService:
         """获取指定原图的控制图列表"""
         from ..models.dataset import ControlImage
         from pathlib import Path
+        from ..core.config import get_config
 
         try:
             # 获取数据集路径
@@ -346,9 +356,8 @@ class DatasetService:
             if not dataset_info:
                 return None
 
+            workspace_root = Path(get_config().storage.workspace_root).resolve()
             dataset_path = dataset_info['path']
-            warehouse_dir = dataset_info['warehouse']
-            warehouse_name = warehouse_dir.name
             controls_dir = dataset_path / "controls"
 
             if not controls_dir.exists():
@@ -372,13 +381,21 @@ class DatasetService:
                 if (control_basename == base_filename or
                     control_basename.startswith(f"{base_filename}_")):
 
-                    # 构建控制图URL - 使用实际的warehouse路径
-                    relative_path = f"datasets/{warehouse_name}/{dataset_path.name}/controls/{control_file.name}"
-                    control_url = f"/workspace/{relative_path}"
+                    # 使用相对路径构建 URL
+                    try:
+                        abs_control = control_file.resolve()
+                        rel_control = abs_control.relative_to(workspace_root)
+                        control_url = f"/workspace/{rel_control.as_posix()}"
+                    except Exception as e:
+                        logger.debug(f"Build control URL fallback: file={control_file}, err={e}")
+                        # 兜底逻辑
+                        warehouse_name = dataset_info['warehouse'].name
+                        control_url = f"/workspace/datasets/{warehouse_name}/{dataset_path.name}/controls/{control_file.name}"
 
                     control_images.append(ControlImage(
                         url=control_url,
-                        filename=control_file.name
+                        filename=control_file.name,
+                        thumbnail_url=control_url  # 不再使用缩略图
                     ))
 
             # 按文件名排序，确保显示顺序一致
@@ -434,7 +451,11 @@ class DatasetService:
             # 检查数据集是否存在
             core_dataset = self._dataset_manager.get_dataset(dataset_id)
             if not core_dataset:
-                raise DatasetNotFoundError(f"Dataset {dataset_id} not found")
+                raise DatasetNotFoundError(
+                    message=f"Dataset {dataset_id} not found",
+                    detail={"dataset_id": dataset_id},
+                    error_code="DATASET_NOT_FOUND",
+                )
 
             total_files = len(files)
             success_count = 0
@@ -496,7 +517,11 @@ class DatasetService:
                 # 检查数据集是否存在且为控制图类型
                 core_dataset = self._dataset_manager.get_dataset(dataset_id)
                 if not core_dataset:
-                    raise DatasetNotFoundError(f"Dataset {dataset_id} not found")
+                    raise DatasetNotFoundError(
+                        message=f"Dataset {dataset_id} not found",
+                        detail={"dataset_id": dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
 
                 if core_dataset.dataset_type not in [DatasetType.SINGLE_CONTROL_IMAGE.value, DatasetType.MULTI_CONTROL_IMAGE.value]:
                     raise ValueError("只有控制图数据集支持上传控制图")
@@ -524,7 +549,11 @@ class DatasetService:
                     # 获取正确的数据集路径
                     dataset_info = self._dataset_manager.datasets.get(dataset_id)
                     if not dataset_info:
-                        raise DatasetNotFoundError(f"Dataset {dataset_id} not found in memory")
+                        raise DatasetNotFoundError(
+                            message=f"Dataset {dataset_id} not found in memory",
+                            detail={"dataset_id": dataset_id},
+                            error_code="DATASET_NOT_FOUND",
+                        )
 
                     dataset_path = dataset_info['path']
                     controls_dir = dataset_path / "controls"

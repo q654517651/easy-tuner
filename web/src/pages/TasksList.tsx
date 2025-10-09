@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { Skeleton, Button } from "@heroui/react";
-import { Link } from "react-router-dom";
-import HeaderBar from "../ui/HeaderBar";
+import { Skeleton, Button, Alert } from "@heroui/react";
+import { Link, useNavigate } from "react-router-dom";
 import TaskRow from "../ui/TaskRow";
 import { trainingApi } from "../services/api";
 import EmptyState from "../ui/EmptyState";
 import EmptyImg from "../assets/img/EmptyDataset.png?inline";
+import { useReadiness } from "../contexts/ReadinessContext";
+import RuntimeInstallModal from "../components/RuntimeInstallModal";
+import { PageLayout } from "../layouts/PageLayout";
+import { formatDateShort, formatDuration } from "../utils/date";
 
 // 导入统一的任务类型
 import type { TrainTask } from "../data/tasks";
@@ -17,6 +20,9 @@ export default function TasksList() {
   const [tasks, setTasks] = useState<TrainTask[]>(_tasksCache ?? []);
   const [loading, setLoading] = useState(_tasksCache === null); // 首次无缓存才显示加载
   const [error, setError] = useState<string | null>(null);
+  const { runtimeReady } = useReadiness();
+  const navigate = useNavigate();
+  const [showRuntimeModal, setShowRuntimeModal] = useState(false);
 
   // 加载训练任务列表
   const loadTasks = async (opts?: { silent?: boolean }) => {
@@ -31,12 +37,12 @@ export default function TasksList() {
         name: task.name,
         status: mapTrainingStateToStatus(task.state),
         model: task.training_type || "Unknown",
-        createdAt: formatDate(task.created_at),
-        // 列表进度改为“步数/总步数”
+        createdAt: formatDateShort(task.created_at),
+        // 列表进度改为"步数/总步数"
         total: task.total_steps || 0,
         done: task.current_step || 0,
         throughput: task.speed || 0,
-        eta: formatEta(task.eta_seconds)
+        eta: task.eta_seconds ? formatDuration(task.eta_seconds) : ''
       }));
 
       _tasksCache = convertedTasks; // 写入缓存
@@ -79,30 +85,7 @@ export default function TasksList() {
     }
   };
 
-  // 格式化日期
-  const formatDate = (dateString: string): string => {
-    if (!dateString) return '';
-    try {
-      const date = new Date(dateString);
-      return date.toISOString().split('T')[0]; // YYYY-MM-DD格式
-    } catch {
-      return dateString;
-    }
-  };
-
-  // 格式化ETA
-  const formatEta = (etaSeconds: number | null | undefined): string => {
-    if (!etaSeconds || etaSeconds <= 0) return '';
-
-    const hours = Math.floor(etaSeconds / 3600);
-    const minutes = Math.floor((etaSeconds % 3600) / 60);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}min`;
-    } else {
-      return `${minutes}min`;
-    }
-  };
+  // 格式化函数已从 utils/date.ts 导入（formatDateShort, formatDuration）
 
   // 延迟展示骨架，避免极短加载时的闪烁
   const [showLoading, setShowLoading] = useState(false);
@@ -119,31 +102,7 @@ export default function TasksList() {
 
   if (error) {
     return (
-      <div className="flex flex-col h-full">
-        <HeaderBar
-          crumbs={[{ label: "任务列表" }]}
-          actions={
-            <Button
-              as={Link as any}
-              to="/train/create"
-              variant="bordered"
-              size="sm"
-              startContent="➕"
-            >
-              创建训练任务
-            </Button>
-          }
-        />
-        <div className="p-6 flex items-center justify-center">
-          <div className="text-red-600">加载失败: {error}</div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col h-full">
-      <HeaderBar
+      <PageLayout
         crumbs={[{ label: "任务列表" }]}
         actions={
           <Button
@@ -156,46 +115,119 @@ export default function TasksList() {
             创建训练任务
           </Button>
         }
-      />
+      >
+        <div className="p-6 flex items-center justify-center">
+          <div className="text-red-600">加载失败: {error}</div>
+        </div>
+      </PageLayout>
+    );
+  }
 
-      <div className="p-6 space-y-4 flex-1 min-h-0 relative">
-        {/* 骨架屏层 - 条件渲染 */}
-        {isSkeleton && (
-          <div className="space-y-3">
-            {[0,1,2].map(i => (
-              <div key={i} className="rounded-2xl bg-content1 ring-1 ring-black/5 dark:ring-white/10 p-4">
-                <div className="flex items-center gap-3">
-                  <Skeleton className="w-12 h-12 rounded-xl">
-                    <div className="w-12 h-12 bg-default-300" />
-                  </Skeleton>
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <Skeleton className="h-4 w-48 rounded-lg">
-                      <div className="h-4 w-48 bg-default-200" />
+  return (
+    <PageLayout
+      crumbs={[{ label: "任务列表" }]}
+      actions={
+        <Button
+          as={Link as any}
+          to="/train/create"
+          variant="bordered"
+          size="sm"
+          startContent="➕"
+        >
+          创建训练任务
+        </Button>
+      }
+    >
+      {/* 空态时使用全屏居中布局 */}
+      {isEmpty ? (
+        <div className="h-full flex flex-col">
+          {!runtimeReady && (
+            <div className="p-6 pb-0">
+              <Alert
+                color="warning"
+                title="运行时环境未安装"
+                description="开始训练前需要先安装 Python 运行时和训练引擎"
+                endContent={
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    color="warning"
+                    onClick={() => setShowRuntimeModal(true)}
+                  >
+                    安装运行时
+                  </Button>
+                }
+              />
+            </div>
+          )}
+          <div className="flex-1 flex items-center justify-center">
+            <EmptyState image={EmptyImg} message="暂无训练任务" />
+          </div>
+        </div>
+      ) : (
+        /* 有数据或加载中时使用正常布局 */
+        <div className="p-6 space-y-4">
+          {/* Runtime Alert */}
+          {!runtimeReady && (
+            <Alert
+              color="warning"
+              title="运行时环境未安装"
+              description="开始训练前需要先安装 Python 运行时和训练引擎"
+              endContent={
+                <Button
+                  size="sm"
+                  variant="flat"
+                  color="warning"
+                  onClick={() => setShowRuntimeModal(true)}
+                >
+                  安装运行时
+                </Button>
+              }
+            />
+          )}
+
+          {/* 骨架屏层 - 条件渲染 */}
+          {isSkeleton && (
+            <div className="space-y-3">
+              {[0,1,2].map(i => (
+                <div key={i} className="rounded-2xl bg-content1 ring-1 ring-black/5 dark:ring-white/10 p-4">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="w-12 h-12 rounded-xl">
+                      <div className="w-12 h-12 bg-default-300" />
                     </Skeleton>
-                    <Skeleton className="h-3 w-72 rounded-lg">
-                      <div className="h-3 w-72 bg-default-200" />
-                    </Skeleton>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <Skeleton className="h-4 w-48 rounded-lg">
+                        <div className="h-4 w-48 bg-default-200" />
+                      </Skeleton>
+                      <Skeleton className="h-3 w-72 rounded-lg">
+                        <div className="h-3 w-72 bg-default-200" />
+                      </Skeleton>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
 
-        {/* 空态层 - 只在非加载且确实为空时显示 */}
-        {isEmpty && (
-          <EmptyState image={EmptyImg} message="暂无训练任务" />
-        )}
-
-        {/* 数据列表层 - 有数据就显示 */}
-        {hasData && (
-          <div className={`space-y-4 transition-opacity duration-300 ${loading ? 'opacity-70' : 'opacity-100'}`}>
-            {tasks.map((task) => (
-              <TaskRow key={task.id} task={task} onTaskDeleted={loadTasks} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+          {/* 数据列表层 - 有数据就显示 */}
+          {hasData && (
+            <div className={`space-y-4 transition-opacity duration-300 ${loading ? 'opacity-70' : 'opacity-100'}`}>
+              {tasks.map((task) => (
+                <TaskRow key={task.id} task={task} onTaskDeleted={loadTasks} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {/* 运行时安装对话框 */}
+      <RuntimeInstallModal
+        isOpen={showRuntimeModal}
+        onClose={() => setShowRuntimeModal(false)}
+        onSuccess={() => setShowRuntimeModal(false)}
+      />
+    </PageLayout>
   );
 }
+
+// 页面末尾挂载运行时安装对话框
+// 由于需在页面根组件中控制，直接放在默认导出组件返回内的末尾

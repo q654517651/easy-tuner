@@ -4,7 +4,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict, Any
 
 from ...models.labeling import (
     BatchLabelingRequest, LabelingProgress, LabelingResult, AvailableModel
@@ -12,6 +12,7 @@ from ...models.labeling import (
 from ...models.response import DataResponse, ListResponse, BaseResponse, TaskResponse
 from ...services.labeling_service import get_labeling_service_api
 from ...core.exceptions import APIException
+from ...core.labeling.providers.registry import get_all_provider_metadata
 
 router = APIRouter()
 
@@ -128,15 +129,29 @@ async def get_labeling_status():
     """获取打标服务状态"""
     return {
         "service": "labeling",
-        "status": "available", 
+        "status": "available",
         "version": "2.0.0",
         "features": [
             "batch_labeling",
-            "multiple_models", 
+            "multiple_models",
             "progress_tracking",
             "task_cancellation"
         ]
     }
+
+
+@router.get("/labeling/providers")
+async def get_labeling_providers() -> ListResponse[Dict[str, Any]]:
+    """获取所有打标 Provider 的元数据和配置字段定义"""
+    try:
+        providers = get_all_provider_metadata()
+        return ListResponse(
+            data=providers,
+            total=len(providers),
+            message=f"获取到 {len(providers)} 个打标 Provider"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取 Provider 列表失败: {str(e)}")
 
 
 class SingleLabelRequest(BaseModel):

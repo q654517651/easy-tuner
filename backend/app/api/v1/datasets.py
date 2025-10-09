@@ -2,8 +2,9 @@
 数据集API路由
 """
 
-from fastapi import APIRouter, Query, Path, HTTPException, Depends, UploadFile, File, Form, Body
+from fastapi import APIRouter, Query, Path, HTTPException, Depends, UploadFile, File, Form, Body, Response
 from typing import List, Optional
+import logging
 
 from ...models.dataset import (
     DatasetBrief, DatasetDetail, CreateDatasetRequest,
@@ -16,6 +17,7 @@ from ...core.exceptions import APIException
 from ...core.dataset.models import DatasetType
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.get("/datasets", response_model=ListResponse[DatasetBrief])
 async def list_datasets(
@@ -43,9 +45,7 @@ async def list_datasets(
     except APIException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        import traceback
-        print(f"list_datasets未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("list_datasets 未处理异常")
         raise HTTPException(status_code=500, detail=f"获取数据集列表失败: {str(e)}")
 
 @router.get("/datasets/types")
@@ -93,6 +93,19 @@ async def create_dataset(
 ):
     """创建数据集"""
     try:
+        # 检查 workspace 是否设置
+        from ...core.config import get_config
+        workspace_root = get_config().storage.workspace_root
+        if not workspace_root or workspace_root.strip() in ('.', './workspace', 'workspace', ''):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "HTTPError",
+                    "error_code": "WORKSPACE_NOT_SET",
+                    "message": "工作区未设置，请先选择工作区目录"
+                }
+            )
+
         success, message, dataset_id = service.create_dataset(request)
         if not success:
             raise HTTPException(status_code=400, detail=message)
@@ -122,9 +135,7 @@ async def upload_media_files(
     except APIException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        import traceback
-        print(f"upload_media_files未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("upload_media_files 未处理异常")
         raise HTTPException(status_code=500, detail=f"上传文件失败: {str(e)}")
 
 @router.put("/datasets/{dataset_id}/media/{filename}/caption", response_model=BaseResponse)
@@ -144,12 +155,10 @@ async def update_media_caption(
     except APIException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        import traceback
-        print(f"update_media_caption未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("update_media_caption 未处理异常")
         raise HTTPException(status_code=500, detail=f"更新标注失败: {str(e)}")
 
-@router.delete("/datasets/{dataset_id}/media/{filename}", response_model=BaseResponse)
+@router.delete("/datasets/{dataset_id}/media/{filename}", status_code=204)
 async def delete_media_file(
     dataset_id: str = Path(..., description="数据集ID"),
     filename: str = Path(..., description="文件名"),
@@ -159,15 +168,13 @@ async def delete_media_file(
     try:
         success, message = service.delete_media_file(dataset_id, filename)
         if success:
-            return BaseResponse(message=message)
+            return Response(status_code=204)
         else:
             raise HTTPException(status_code=500, detail=message)
     except APIException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        import traceback
-        print(f"delete_media_file未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("delete_media_file 未处理异常")
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
 
 @router.put("/datasets/{dataset_id}/rename", response_model=DataResponse[DatasetDetail])
@@ -194,12 +201,10 @@ async def rename_dataset(
     except APIException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        import traceback
-        print(f"rename_dataset未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("rename_dataset 未处理异常")
         raise HTTPException(status_code=500, detail=f"重命名数据集失败: {str(e)}")
 
-@router.delete("/datasets/{dataset_id}", response_model=BaseResponse)
+@router.delete("/datasets/{dataset_id}", status_code=204)
 async def delete_dataset(
     dataset_id: str = Path(..., description="数据集ID"),
     service: DatasetService = Depends(get_dataset_service)
@@ -208,7 +213,7 @@ async def delete_dataset(
     try:
         success, message = service.delete_dataset(dataset_id)
         if success:
-            return BaseResponse(message="删除数据集成功")
+            return Response(status_code=204)
         else:
             raise HTTPException(status_code=500, detail="删除数据集失败")
     except APIException as e:
@@ -253,9 +258,7 @@ async def get_dataset_tag_stats(
     except APIException as e:
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
-        import traceback
-        print(f"get_dataset_tag_stats未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("get_dataset_tag_stats 未处理异常")
         raise HTTPException(status_code=500, detail=f"获取标签统计失败: {str(e)}")
 
 @router.post("/datasets/{dataset_id}/control-images", response_model=DataResponse[dict])

@@ -26,10 +26,3 @@ class SystemGPUResponse(BaseModel):
     gpus: List[GPUMetrics]
     timestamp: str
     total_gpus: int
-
-
-class GPUError(BaseModel):
-    """GPU错误信息模型"""
-    error_type: str
-    message: str
-    gpu_id: Optional[int] = None

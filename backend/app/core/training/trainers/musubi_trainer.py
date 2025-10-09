@@ -19,7 +19,7 @@ from typing import Callable, Optional, Dict, Any, List
 
 from ....utils.logger import log_info, log_error, log_success, log_progress
 from ....utils.log_sink import LogSink
-from ....utils.exceptions import TrainingError
+from ....core.exceptions import TrainingError
 from ....utils.network_retry import NetworkRetryHelper
 from ...config import get_config
 from ..models import BaseTrainingConfig, TrainingTask, TrainingState, get_model, list_models, build_cli_args, \
@@ -33,7 +33,10 @@ class MusubiTrainer:
     _ACCELERATE_MODULE = "accelerate.commands.launch"
 
     def __init__(self, task_id: str, event_bus=None):
+        from ...environment import get_paths
+
         self.config = get_config()
+        self._paths = get_paths()  # 缓存环境路径
         self.task_id = task_id
         self.event_bus = event_bus
         self._proc: Optional[subprocess.Popen] = None
@@ -72,19 +75,10 @@ class MusubiTrainer:
     @property
     def _PROJECT_ROOT(self) -> Path:
         """
-        查找项目根：向上找包含 `runtime/` 目录的目录。
+        获取项目根目录（从环境管理器缓存）
         仅用于设置 Popen 的 cwd，不会写入 CLI 参数。
         """
-        cur = Path(__file__).resolve()
-        for p in (cur, *cur.parents):
-            if (p / "runtime").exists():
-                return p
-        # 兜底：查找包含main.py的目录（项目根标识）
-        for p in (cur, *cur.parents):
-            if (p / "main.py").exists():
-                return p
-        # 最后兜底：当前工作目录
-        return Path.cwd()
+        return self._paths.project_root
 
     # 仅返回"相对项目根"的 accelerate 命令
     def _get_accelerate_cmd(self) -> List[str]:
@@ -113,7 +107,14 @@ class MusubiTrainer:
                 p = base / "musubi_tuner" / rel
             if p.suffix != ".py":
                 p = p.with_suffix(".py")
-            if not (self._PROJECT_ROOT / p).exists():
+
+            full_path = self._PROJECT_ROOT / p
+            log_info(f"[脚本解析] 相对路径: {p.as_posix()}")
+            log_info(f"[脚本解析] 项目根: {self._PROJECT_ROOT}")
+            log_info(f"[脚本解析] 完整路径: {full_path}")
+            log_info(f"[脚本解析] 是否存在: {full_path.exists()}")
+
+            if not full_path.exists():
                 raise TrainingError(f"脚本不存在: {p.as_posix()}（相对项目根）")
             return p.as_posix()
 
@@ -137,12 +138,18 @@ class MusubiTrainer:
             "cache_steps": cache_steps,
         }
 
-    # 把任意路径转成"相对项目根"的 POSIX 字符串（失败就抛错，不回退绝对）
+    # 把任意路径转成"相对 workspace_root"的 POSIX 字符串（失败就抛错，不回退绝对）
     def _rel_to_root_posix(self, p: Path) -> str:
+        workspace_root = self._paths.workspace_root
         try:
-            rel = os.path.relpath(p, self._PROJECT_ROOT)
+            rel = os.path.relpath(p, workspace_root)
         except ValueError:
-            raise TrainingError(f"路径不在项目根之下，无法使用相对路径: {p}")
+            raise TrainingError(f"路径不在工作区之下，无法使用相对路径: {p}，工作区: {workspace_root}")
+
+        # 检查是否越界（包含 ..）
+        if rel.startswith('..'):
+            raise TrainingError(f"路径越界，不在工作区之下: {p}，工作区: {workspace_root}")
+
         return rel.replace("\\", "/")
 
 
@@ -176,13 +183,13 @@ class MusubiTrainer:
         """
         # 1) 计算数据集路径（预览模式可跳过严格校验）
         if preview_mode:
-            dataset_path = Path(f"workspace/datasets/{task.dataset_id}/original")
+            dataset_path = Path(self.config.storage.workspace_root) / "datasets" / (task.dataset_id or "preview") / "original"
         else:
             dataset_path = self._resolve_dataset_path(task.dataset_id)
 
         if preview_mode:
             # 预览模式：使用虚拟路径，不创建实际目录
-            training_dir = Path("workspace/tasks/preview")
+            training_dir = Path(self.config.storage.workspace_root) / "tasks" / "preview"
             cache_dir = training_dir / "cache"
         else:
             # 实际训练：使用统一的任务目录

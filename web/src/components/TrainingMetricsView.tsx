@@ -395,7 +395,7 @@ export const TrainingMetricsView: React.FC<TrainingMetricsViewProps> = ({
   return (
     <div className="grid grid-cols-2 gap-6 h-full pb-4" ref={containerRef}>
       {/* Loss曲线 */}
-      <Card className="h-full flex flex-col bg-[#F9F9FA] dark:bg-white/4 shadow-none">
+      <Card className="h-full flex flex-col shadow-none" style={{ backgroundColor: 'var(--bg2)' }}>
         <CardHeader className="pb-2 px-4 pt-4">
           <h3 className="text-lg font-semibold">Loss曲线</h3>
         </CardHeader>
@@ -416,7 +416,7 @@ export const TrainingMetricsView: React.FC<TrainingMetricsViewProps> = ({
       </Card>
 
       {/* 学习率曲线 */}
-      <Card className="h-full flex flex-col bg-[#F9F9FA] dark:bg-white/4 shadow-none">
+      <Card className="h-full flex flex-col shadow-none" style={{ backgroundColor: 'var(--bg2)' }}>
         <CardHeader className="pb-2 px-4 pt-4">
           <h3 className="text-lg font-semibold">学习率曲线</h3>
         </CardHeader>

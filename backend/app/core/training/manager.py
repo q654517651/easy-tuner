@@ -18,7 +18,7 @@ from ..state.models import TrainingState
 from ..state.manager import TrainingStateManager
 from ..state.events import EventBus
 from ...utils.logger import log_info, log_error, log_success
-from ...utils.exceptions import TrainingError, TrainingNotFoundError
+from ...core.exceptions import TrainingError, TrainingNotFoundError
 from ..config import get_config
 
 
@@ -703,17 +703,101 @@ class TrainingManager:
                 # 扫描checkpoint文件
                 for file_path in output_dir.rglob("*.safetensors"):
                     if file_path.is_file():
-                        rel_path = str(file_path.relative_to(task_dir))
+                        rel_path = file_path.relative_to(task_dir).as_posix()
                         task.checkpoint_files.append(rel_path)
 
                 # 扫描样本图片
                 for file_path in output_dir.rglob("*.png"):
                     if file_path.is_file():
-                        rel_path = str(file_path.relative_to(task_dir))
+                        rel_path = file_path.relative_to(task_dir).as_posix()
                         task.sample_images.append(rel_path)
 
         except Exception as e:
             log_error(f"扫描输出文件失败: {e}")
+
+    # -------------------------
+    # 样例/产物列表（对外提供）
+    # -------------------------
+    def list_task_samples(self, task_id: str) -> list[dict]:
+        """返回样例图片列表，每项包含 filename 与相对路径 rel_path。
+
+        优先读取 Task.sample_images；若为空，则按约定扫描 task_id/output/sample 下常见图片格式。
+        rel_path 均以任务目录为基准（如 output/sample/xxx.png）。
+        """
+        from pathlib import Path as _P
+        with self._lock:
+            task = self._tasks.get(task_id)
+        if not task:
+            raise TrainingNotFoundError(
+                message=f"任务不存在: {task_id}",
+                detail={"task_id": task_id},
+                error_code="TRAINING_NOT_FOUND",
+            )
+
+        rel_list: list[str] = list(getattr(task, 'sample_images', []) or [])
+        # 兼容历史数据中的反斜杠路径
+        rel_list = [rp.replace('\\', '/') for rp in rel_list]
+        items: list[dict] = []
+
+        if not rel_list:
+            try:
+                task_dir = self.tasks_dir / task.id
+                sample_dir = task_dir / 'output' / 'sample'
+                if sample_dir.exists():
+                    for img_file in sample_dir.iterdir():
+                        if img_file.is_file() and img_file.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp'):
+                            rel_path = img_file.relative_to(task_dir).as_posix()
+                            rel_list.append(rel_path)
+                rel_list.sort()
+                with self._lock:
+                    task.sample_images = rel_list
+            except Exception as e:
+                log_error(f"扫描样例图片失败: {e}")
+
+        for rel_path in rel_list:
+            filename = _P(rel_path).name
+            items.append({"filename": filename, "rel_path": rel_path})
+        return items
+
+    def list_task_artifacts(self, task_id: str) -> list[dict]:
+        """返回产物权重列表，每项包含 filename 与相对路径 rel_path。
+
+        优先读取 Task.checkpoint_files；若为空，则扫描 task_id/output 下 *.safetensors。
+        rel_path 以任务目录为基准（如 output/xxx.safetensors）。
+        """
+        from pathlib import Path as _P
+        with self._lock:
+            task = self._tasks.get(task_id)
+        if not task:
+            raise TrainingNotFoundError(
+                message=f"任务不存在: {task_id}",
+                detail={"task_id": task_id},
+                error_code="TRAINING_NOT_FOUND",
+            )
+
+        rel_list: list[str] = list(getattr(task, 'checkpoint_files', []) or [])
+        rel_list = [rp.replace('\\', '/') for rp in rel_list]
+        items: list[dict] = []
+
+        if not rel_list:
+            try:
+                task_dir = self.tasks_dir / task.id
+                output_dir = task_dir / 'output'
+                if output_dir.exists():
+                    for model_file in output_dir.rglob('*.safetensors'):
+                        if model_file.is_file():
+                            rel_path = model_file.relative_to(task_dir).as_posix()
+                            rel_list.append(rel_path)
+                rel_list.sort()
+                with self._lock:
+                    task.checkpoint_files = rel_list
+            except Exception as e:
+                log_error(f"扫描模型产物失败: {e}")
+
+        for rel_path in rel_list:
+            filename = _P(rel_path).name
+            items.append({"filename": filename, "rel_path": rel_path})
+        return items
 
     async def _run_training_async(self, task_id: str):
         """异步运行训练"""
@@ -1046,16 +1130,15 @@ class TrainingManager:
 _global_training_manager: Optional[TrainingManager] = None
 
 
+    # -------------------------
+    # 样例/产物列表（对外提供）
+    # -------------------------
 def get_training_manager() -> TrainingManager:
     """获取全局训练管理器实例"""
     global _global_training_manager
     if _global_training_manager is None:
-        from ..state.manager import get_state_manager
-        from ..state.events import get_event_bus
-        _global_training_manager = TrainingManager(get_state_manager(), get_event_bus())
+        raise RuntimeError("TrainingManager is not initialized. Call initialize_training_manager(state_manager, event_bus, main_loop) at app startup.")
     return _global_training_manager
-
-
 def initialize_training_manager(state_manager: TrainingStateManager, event_bus: EventBus, main_loop: asyncio.AbstractEventLoop) -> TrainingManager:
     """初始化训练管理器（用于应用启动）"""
     global _global_training_manager

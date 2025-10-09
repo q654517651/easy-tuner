@@ -8,6 +8,7 @@ import { TaskSamplesView } from "../components/TaskSamplesView";
 import { TrainingMetricsView } from "../components/TrainingMetricsView";
 import { useGpuMetricsWS } from "../hooks/useGpuMetricsWS";
 import { useTrainingWebSocket } from "../hooks/useTrainingWebSocket";
+import RuntimeInstallModal from "../components/RuntimeInstallModal";
 import PowerIcon from "../assets/traing_icon/power.svg";
 import VramIcon from "../assets/traing_icon/vram.svg";
 import TemperatureIcon from "../assets/traing_icon/temperature.svg";
@@ -44,6 +45,7 @@ export default function TaskDetail() {
   const { isOpen: isRestartOpen, onOpen: onRestartOpen, onClose: onRestartClose } = useDisclosure();
   const [actionHover, setActionHover] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [showRuntimeModal, setShowRuntimeModal] = useState(false);
 
   // GPU指标状态
   const [gpuMetrics, setGpuMetrics] = useState<GPUMetrics[]>([]);
@@ -237,8 +239,20 @@ export default function TaskDetail() {
         const updatedTask = await trainingApi.getTask(id);
         setTask(updatedTask);
       }, 1000);
-    } catch (error) {
+    } catch (error: any) {
       console.error(`${action}任务失败:`, error);
+
+      // 检查是否为 PYTHON_MISSING 错误
+      if (error?.detail?.error_code === 'PYTHON_MISSING') {
+        setShowRuntimeModal(true);
+      } else {
+        addToast({
+          title: `${action === 'start' ? '启动' : '停止'}任务失败`,
+          description: String(error?.detail?.message || error?.message || error),
+          color: 'danger',
+          timeout: 3000
+        });
+      }
     }
   };
 
@@ -504,6 +518,13 @@ export default function TaskDetail() {
           </div>
         )}
       </div>
+
+      {/* Runtime 安装对话框 */}
+      <RuntimeInstallModal
+        isOpen={showRuntimeModal}
+        onClose={() => setShowRuntimeModal(false)}
+        onSuccess={() => handleControl('start')}
+      />
     </div>
   );
 }

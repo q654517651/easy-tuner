@@ -5,6 +5,7 @@
 
 from typing import Dict, Set, Any, List
 from dataclasses import fields
+from ..utils.logger import log_info as _log_info
 
 
 class ModelPathsSchemaManager:
@@ -44,7 +45,7 @@ class ModelPathsSchemaManager:
                 "fields": model_fields
             }
 
-        print(f"ModelPathsSchemaManager初始化完成，加载了 {len(self._schema_cache)} 个模型配置")
+        _log_info(f"ModelPathsSchemaManager 初始化完成，加载了 {len(self._schema_cache)} 个模型配置")
 
     def get_schema(self) -> Dict[str, Any]:
         """获取当前schema（从缓存）"""

@@ -8,15 +8,15 @@ import { useTrainingWebSocket } from "../hooks/useTrainingWebSocket";
 
 function StatusPill({ s }: { s: TrainTask["status"] }) {
   const map: Record<TrainTask["status"], { label: string; cls: string }> = {
-    pending:   { label: "⏳ 等待中", cls: "bg-neutral-200 text-neutral-600" },
-    running:   { label: "▶️ 训练中", cls: "bg-sky-100 text-sky-600" },
-    completed: { label: "✅ 已完成", cls: "bg-emerald-100 text-emerald-700" },
-    failed:    { label: "❌ 失败",   cls: "bg-rose-100 text-rose-700" },
-    cancelled: { label: "⏹️ 已取消", cls: "bg-amber-100 text-amber-600" },
+    pending:   { label: "⏳ 等待中", cls: "bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300" },
+    running:   { label: "▶️ 训练中", cls: "bg-sky-100 dark:bg-sky-900/50 text-sky-600 dark:text-sky-400" },
+    completed: { label: "✅ 已完成", cls: "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400" },
+    failed:    { label: "❌ 失败",   cls: "bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-400" },
+    cancelled: { label: "⏹️ 已取消", cls: "bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400" },
   };
 
   // 添加安全检查，防止 undefined 或无效状态
-  const m = map[s] || { label: "未知", cls: "bg-gray-100 text-gray-600" };
+  const m = map[s] || { label: "未知", cls: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300" };
 
   return (
     <span className={`px-2 h-7 inline-flex items-center rounded-lg text-xs ${m.cls}`}>
@@ -160,33 +160,33 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
     <div
       ref={containerRef}
       onClick={() => navigate(`/tasks/${task.id}`)}   // ⬅️ 整个卡片可点
-      className="group relative rounded-2xl bg-neutral-100/80 dark:bg-white/5 ring-1 ring-black/5 dark:ring-white/10 p-4 sm:p-5 flex items-start gap-3 cursor-pointer hover:bg-neutral-200/50 dark:hover:bg-white/10 transition"
+      className="group relative rounded-2xl p-4 sm:p-5 flex items-start gap-3 cursor-pointer hover:bg-neutral-200/50 dark:hover:bg-white/10 transition"
+      style={{ backgroundColor: 'var(--bg2)' }}
     >
       {/* 左侧图标 */}
-      <div className="w-10 h-10 rounded-xl bg-sky-500/15 text-sky-600 grid place-items-center text-xl shrink-0">
+      <div className="w-12 h-12 rounded-xl bg-sky-500/15 text-sky-600 grid place-items-center text-xl shrink-0">
         🧊
       </div>
 
       {/* 中部文本 */}
-      <div className="flex-1 min-w-0 pr-12">
-        <div className="flex items-center gap-3">
-          <div className="font-semibold truncate">{task.name || "未知任务"}</div>
-          <div className="hidden sm:flex items-center gap-2">
-            <StatusPill s={task.status} />
-            <span className="px-2 h-7 inline-flex items-center rounded-lg text-xs bg-neutral-200/80 dark:bg-white/10 text-neutral-600 dark:text-neutral-300">
-              {task.model || "未知模型"}
-            </span>
-            <span className="px-2 h-7 inline-flex items-center rounded-lg text-xs bg-neutral-200/80 dark:bg-white/10 text-neutral-600 dark:text-neutral-300">
-              {task.createdAt || "未知日期"}
-            </span>
-          </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold truncate">{task.name || "未知任务"}</div>
+
+        <div className="mt-1 flex items-center gap-2">
+          <StatusPill s={task.status} />
+          <span className="px-2 h-7 inline-flex items-center rounded-lg text-xs bg-neutral-200/80 dark:bg-white/10 text-neutral-600 dark:text-neutral-300">
+            {task.model || "未知模型"}
+          </span>
+          <span className="px-2 h-7 inline-flex items-center rounded-lg text-xs bg-neutral-200/80 dark:bg-white/10 text-neutral-600 dark:text-neutral-300">
+            {task.createdAt || "未知日期"}
+          </span>
         </div>
 
         {/* 进度条和进度信息 */}
-        <div className="mt-3">
+        <div className="mt-4">
           <div className="h-1.5 rounded-full bg-neutral-200/80 dark:bg-white/10 overflow-hidden">
             <div
-              className="h-full bg-sky-500 rounded-full transition-[width] duration-300"
+              className="h-full bg-blue-500 rounded-full transition-[width] duration-300"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -199,7 +199,7 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
 
       {/* 更多按钮位 */}
       <div
-        className="absolute top-3 right-3"
+        className="absolute top-2 right-2"
         onClick={(e) => e.stopPropagation()}
       >
         <Dropdown placement="bottom-end">
@@ -210,7 +210,7 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
               size="sm"
               className="w-9 h-9"
             >
-              <span className="flex items-center justify-center w-6 h-6 [&>svg]:w-6 [&>svg]:h-6 [&_path]:fill-current text-gray-900 dark:text-gray-100">
+              <span className="flex items-center justify-center w-6 h-6 [&>svg]:w-6 [&>svg]:h-6 [&_path]:fill-current text-gray-700 dark:text-gray-300">
                 <MoreIcon />
               </span>
             </Button>

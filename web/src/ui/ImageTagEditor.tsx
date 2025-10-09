@@ -1,4 +1,21 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import ScrollArea from "./ScrollArea";
 
 // 判断文件类型的工具函数
@@ -7,6 +24,12 @@ const isVideoFile = (filename: string): boolean => {
   const ext = filename.toLowerCase().slice(filename.lastIndexOf('.'));
   return videoExts.includes(ext);
 };
+
+// TagItem 接口 - 用于派生唯一 id
+interface TagItem {
+  id: string;    // 唯一标识，格式：`${index}::${label}`
+  label: string; // 实际标签文本
+}
 
 
 interface MediaItem {
@@ -22,42 +45,53 @@ interface ImageTagEditorProps {
   allTags?: string[]; // 数据集中所有标签，用于自动补全
 }
 
-interface TagChipProps {
-  tag: string;
-  index: number;
+// SortableTagChip Props
+interface SortableTagChipProps {
+  id: string;      // 唯一 id
+  label: string;   // 显示文本
   isEditing: boolean;
   onRemove: () => void;
   onEdit: (newTag: string) => void;
   onEnterEdit: () => void;
   onRequestClose: () => void;
-  onDragStart: (index: number) => void;
-  onDragOver: (index: number) => void;
-  onDrop: (index: number) => void;
-  isDragging: boolean;
-  isDragOver: boolean;
 }
 
-function TagChip({
-  tag,
-  index,
+// 可排序的标签组件
+function SortableTagChip({
+  id,
+  label,
   isEditing,
   onRemove,
   onEdit,
   onEnterEdit,
   onRequestClose,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  isDragging,
-  isDragOver,
-}: TagChipProps) {
-  const [editValue, setEditValue] = useState(tag);
+}: SortableTagChipProps) {
+  const [editValue, setEditValue] = useState(label);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // tag 变化时同步本地值
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  // 合并 scale 到 transform，兼容性更好
+  const style: React.CSSProperties = {
+    transform: transform
+      ? `${CSS.Transform.toString(transform)} scale(${isDragging ? 1.05 : 1})`
+      : `scale(${isDragging ? 1.05 : 1})`,
+    transition: transition || 'transform 200ms cubic-bezier(.2,.8,.2,1), opacity 200ms ease',
+    opacity: isDragging ? 0.6 : 1,
+    willChange: 'transform',
+  };
+
+  // label 变化时同步本地值
   useEffect(() => {
-    setEditValue(tag);
-  }, [tag]);
+    setEditValue(label);
+  }, [label]);
 
   // 进入编辑态后自动聚焦
   useEffect(() => {
@@ -71,9 +105,9 @@ function TagChip({
 
   const handleSave = () => {
     const next = editValue.trim();
-    if (next && next !== tag) onEdit(next);
+    if (next && next !== label) onEdit(next);
     onRequestClose();
-    setEditValue(tag); // 显示态回到最新 tag
+    setEditValue(label);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -83,71 +117,48 @@ function TagChip({
     } else if (e.key === "Escape") {
       e.preventDefault();
       onRequestClose();
-      setEditValue(tag);
+      setEditValue(label);
     }
   };
 
-  // —— 编辑态 —— //
+  // 编辑态
   if (isEditing) {
     return (
       <div
-        className={`block w-full px-3 py-1.5 rounded-md text-sm leading-5 ring-2 ring-blue-500 bg-transparent text-gray-900 dark:text-white transition-colors ${
-          isDragging ? "opacity-50" : ""
-        }`}
-        draggable={false}
-        title="编辑标签，回车保存，Esc 取消"
+        ref={setNodeRef}
+        style={style}
+        className="block w-full rounded-md text-sm leading-5 ring-2 ring-blue-500 bg-transparent text-gray-900 dark:text-white transition-colors"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <input
-          ref={inputRef}
-          className="w-full bg-transparent outline-none text-sm leading-5 font-medium"
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleSave}
-          onKeyDown={handleKeyDown}
-          autoFocus
-        />
+        <div style={{ padding: '6px' }}>
+          <input
+            ref={inputRef}
+            className="w-full bg-transparent outline-none text-sm leading-5 font-medium"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={handleKeyDown}
+            autoFocus
+          />
+        </div>
       </div>
     );
   }
 
-  // —— 查看态 —— //
+  // 查看态
   return (
     <div
-      className={`block w-full px-3 py-1.5 rounded-md text-sm leading-5 ring-2 ring-transparent bg-content2 text-gray-700 dark:text-gray-300 group hover:bg-content3 transition-colors cursor-pointer ${
-        isDragging ? "opacity-50 scale-95 rotate-3" : ""
-      } ${isDragOver ? "ring-blue-400 bg-blue-50 dark:bg-blue-900/20" : ""}`}
-      draggable={!isEditing}
-      onDragStart={(e) => {
-        // 仅处理标签排序，避免触发页面级"文件导入"
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("application/tag-sort", index.toString());
-        e.stopPropagation();
-        onDragStart(index);
-      }}
-      onDragOver={(e) => {
-        if (!e.dataTransfer.types.includes("application/tag-sort")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        e.dataTransfer.dropEffect = "move";
-        onDragOver(index);
-      }}
-      onDrop={(e) => {
-        if (!e.dataTransfer.types.includes("application/tag-sort")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        onDrop(index);
-      }}
-      title="点击编辑，拖拽排序"
-      onClick={(e) => {
-        e.stopPropagation();
-        onEnterEdit();
-      }}
+      ref={setNodeRef}
+      style={style}
+      className="block w-full rounded-md text-sm leading-5 ring-2 ring-transparent bg-content2 text-gray-700 dark:text-gray-300 group hover:bg-content3 transition-all duration-200 cursor-pointer"
+      {...attributes}
+      {...listeners}
+      onClick={onEnterEdit}
     >
-      <div className="flex items-start gap-1">
+      <div className="flex items-center gap-1" style={{ padding: '6px' }}>
         {/* 拖拽图标 */}
         <svg
-          className="w-3 h-3 mt-0.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          className="w-3 h-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
           fill="currentColor"
           viewBox="0 0 20 20"
         >
@@ -163,7 +174,7 @@ function TagChip({
             lineHeight: "1.25rem",
           }}
         >
-          {tag}
+          {label}
         </span>
 
         {/* 删除按钮 */}
@@ -172,7 +183,7 @@ function TagChip({
             e.stopPropagation();
             onRemove();
           }}
-          className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5"
+          className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
           title="删除标签"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -185,6 +196,7 @@ function TagChip({
 }
 
 
+
 export default function ImageTagEditor({image, onTagsChange, allTags = []}: ImageTagEditorProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [inputValue, setInputValue] = useState("");
@@ -194,12 +206,24 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
   const inputRef = useRef<HTMLInputElement>(null);
   const saveTimerRef = useRef<number | null>(null);
 
-  // 拖拽状态
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-
-  // 编辑状态 - 统一管理哪个标签正在编辑
+  // dnd-kit 状态
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
+  // 派生唯一 items 数组（允许重复 label）
+  const items = useMemo(
+    () => tags.map((label, i) => ({ id: `${i}::${label}`, label })),
+    [tags]
+  );
+
+  // 传感器配置（防误触 + 键盘支持）
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  // 找到当前拖拽的项（用于预览）
+  const activeItem = items.find(i => i.id === activeId);
 
   // 视频相关状态
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -218,8 +242,8 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
       setTags([]);
       setIsVideo(false);
     }
-    // 重置拖拽状态和编辑状态
-    resetDragState();
+    // 重置状态
+    setActiveId(null);
     setEditingIndex(null);
     setIsHovering(false);
   }, [image]);
@@ -302,40 +326,25 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
     }
   };
 
-  // 拖拽排序相关函数
-  const handleDragStart = (index: number) => {
-    setDraggedIndex(index);
-    setDragOverIndex(null);
+  // dnd-kit 拖拽处理
+  const handleDragStart = (event: any) => {
+    setActiveId(String(event.active.id));
+    setEditingIndex(null); // 拖拽时关闭编辑态
   };
 
-  const handleDragOver = (index: number) => {
-    if (draggedIndex !== null && draggedIndex !== index) {
-      setDragOverIndex(index);
-    }
-  };
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    setActiveId(null);
 
-  const handleDrop = (dropIndex: number) => {
-    if (draggedIndex !== null && draggedIndex !== dropIndex) {
-      const newTags = [...tags];
-      const draggedItem = newTags[draggedIndex];
+    if (!over || active.id === over.id) return;
 
-      // 移除被拖拽的项目
-      newTags.splice(draggedIndex, 1);
+    const oldIndex = items.findIndex(i => i.id === active.id);
+    const newIndex = items.findIndex(i => i.id === over.id);
 
-      // 在新位置插入项目
-      newTags.splice(dropIndex, 0, draggedItem);
+    if (oldIndex < 0 || newIndex < 0) return;
 
-      updateTags(newTags);
-    }
-
-    // 重置拖拽状态
-    setDraggedIndex(null);
-    setDragOverIndex(null);
-  };
-
-  const resetDragState = () => {
-    setDraggedIndex(null);
-    setDragOverIndex(null);
+    // 使用 arrayMove 重排序并立即保存
+    updateTags(arrayMove(tags, oldIndex, newIndex));
   };
 
   // 键盘事件处理
@@ -466,7 +475,7 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
 
         {/* 标签容器 - 充满剩余空间 */}
         <div className="flex-1 min-h-0 p-4 pt-0">
-          <div className="h-full border border-black/5 dark:border-white/10 rounded-lg">
+          <div className="h-full rounded-lg bg-black/[0.04] dark:bg-white/[0.04]">
             {tags.length === 0 ? (
               <div className="flex items-center justify-center h-full">
                 <p className="text-gray-500 dark:text-gray-400 text-sm">暂无标签</p>
@@ -474,48 +483,48 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
             ) : (
               <ScrollArea className="h-full">
                 <div className="p-3">
-                  <div
-                    className="flex flex-wrap gap-2"
-                    onPointerDownCapture={() => setEditingIndex(null)}
-                    onDragOver={(e) => {
-                      // 只处理标签排序拖拽，阻止文件导入
-                      if (e.dataTransfer.types.includes('application/tag-sort')) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }
-                    }}
-                    onDrop={(e) => {
-                      // 只处理标签排序拖拽，阻止文件导入
-                      if (e.dataTransfer.types.includes('application/tag-sort')) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }
-                    }}
-                    onDragLeave={(e) => {
-                      // 只有当拖拽离开整个容器时才重置状态
-                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                        resetDragState();
-                      }
-                    }}
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    modifiers={[restrictToVerticalAxis]}
                   >
-                    {tags.map((tag, index) => (
-                      <TagChip
-                        key={`${tag}-${index}`}
-                        tag={tag}
-                        index={index}
-                        isEditing={editingIndex === index}
-                        onRemove={() => removeTag(index)}
-                        onEdit={(newTag) => editTag(index, newTag)}
-                        onEnterEdit={() => setEditingIndex(index)}
-                        onRequestClose={() => setEditingIndex(null)}
-                        onDragStart={handleDragStart}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDrop}
-                        isDragging={draggedIndex === index}
-                        isDragOver={dragOverIndex === index}
-                      />
-                    ))}
-                  </div>
+                    <SortableContext
+                      items={items.map(it => it.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="flex flex-col gap-2">
+                        {items.map((it, idx) => (
+                          <SortableTagChip
+                            key={it.id}
+                            id={it.id}
+                            label={it.label}
+                            isEditing={editingIndex === idx}
+                            onRemove={() => removeTag(idx)}
+                            onEdit={(newTag) => editTag(idx, newTag)}
+                            onEnterEdit={() => setEditingIndex(idx)}
+                            onRequestClose={() => setEditingIndex(null)}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+
+                    {/* 跟手预览 */}
+                    <DragOverlay
+                      dropAnimation={{
+                        duration: 180,
+                        easing: 'cubic-bezier(.2,.8,.2,1)',
+                        dragSourceOpacity: 0, // 拖拽源在落下时不出现双影
+                      }}
+                    >
+                      {activeItem ? (
+                        <div className="rounded-md bg-content2 shadow-xl" style={{ padding: '6px', transform: 'scale(1.05)' }}>
+                          <span className="font-medium">{activeItem.label}</span>
+                        </div>
+                      ) : null}
+                    </DragOverlay>
+                  </DndContext>
                 </div>
               </ScrollArea>
             )}

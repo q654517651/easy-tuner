@@ -44,7 +44,8 @@ message Event {
             self._create_simple_event_class()
 
         except Exception as e:
-            print(f"创建protobuf类失败: {e}")
+            from backend.app.utils.logger import log_error
+            log_error("创建protobuf类失败", exc=e)
             self._event_class = None
 
     def _create_simple_event_class(self):

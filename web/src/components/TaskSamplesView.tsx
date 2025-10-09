@@ -109,7 +109,7 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
   return (
     <div className="space-y-6">
       {/* 过程采样区域 */}
-      <Card className="shadow-none bg-[#F9F9FA] dark:bg-white/4">
+      <Card className="shadow-none" style={{ backgroundColor: 'var(--bg2)' }}>
         <CardHeader className="flex items-center justify-between pb-3">
           <h3 className="text-base font-semibold">过程采样</h3>
           <Button
@@ -154,7 +154,7 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
       </Card>
 
       {/* 保存结果区域 */}
-      <Card className="shadow-none bg-[#F9F9FA] dark:bg-white/4">
+      <Card className="shadow-none" style={{ backgroundColor: 'var(--bg2)' }}>
         <CardHeader className="flex items-center justify-between pb-3">
           <h3 className="text-base font-semibold">保存结果</h3>
           <Button
@@ -173,7 +173,8 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
             {artifacts.map((item) => (
               <Card
                 key={item.filename}
-                className="shadow-none border-none bg-[#F9F9FA] dark:bg-white/4"
+                className="shadow-none border-none"
+                style={{ backgroundColor: 'var(--bg2)' }}
               >
                 <CardBody className="p-4 flex flex-col items-center justify-center min-h-[120px]">
                   <div className="w-12 h-12 mb-3 bg-primary-100 rounded-lg flex items-center justify-center text-2xl">

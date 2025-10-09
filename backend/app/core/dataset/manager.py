@@ -19,9 +19,9 @@ from .utils import (
     get_dataset_warehouse_path, get_dataset_subdirs
 )
 from ...utils.logger import log_info, log_error, log_success
-from ...utils.exceptions import (
-    DatasetError, DatasetNotFoundError, DatasetCreateError,
-    ValidationError
+from ...core.exceptions import (
+    DatasetNotFoundError,
+    ValidationError,
 )
 from ...utils.validators import validate_dataset_name
 from ..config import get_config
@@ -173,7 +173,11 @@ class DatasetManager:
         with self._lock:
             try:
                 if dataset_id not in self.datasets:
-                    raise DatasetNotFoundError(dataset_id)
+                    raise DatasetNotFoundError(
+                        message=f"数据集未找到: {dataset_id}",
+                        detail={"dataset_id": dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
                 
                 validate_dataset_name(new_name)
                 
@@ -219,7 +223,11 @@ class DatasetManager:
         with self._lock:
             try:
                 if dataset_id not in self.datasets:
-                    raise DatasetNotFoundError(dataset_id)
+                    raise DatasetNotFoundError(
+                        message=f"数据集未找到: {dataset_id}",
+                        detail={"dataset_id": dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
 
                 dataset_info = self.datasets[dataset_id]
                 dataset = dataset_info['dataset']
@@ -348,13 +356,20 @@ class DatasetManager:
             }
         return {"src": "", "abs": "", "local": ""}
 
-    def import_files_to_dataset(self, dataset_id: str, file_paths: List[str], control_files: List[str] = None) -> Tuple[int, str]:
-        """根据数据集类型导入文件"""
+    def import_files_to_dataset(self, dataset_id: str, file_paths: List[str]) -> Tuple[int, str]:
+        """根据数据集类型导入文件
+
+        对于控制图数据集，仅导入原图到 targets/ 目录，控制图需通过手动上传接口单独添加
+        """
         with self._lock:
             try:
                 dataset_info = self.datasets.get(dataset_id)
                 if not dataset_info:
-                    raise DatasetNotFoundError(dataset_id)
+                    raise DatasetNotFoundError(
+                        message=f"数据集未找到: {dataset_id}",
+                        detail={"dataset_id": dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
 
                 dataset = dataset_info['dataset']
                 dataset_path = dataset_info['path']
@@ -364,12 +379,8 @@ class DatasetManager:
                 elif dataset.dataset_type == "video":
                     success_count = self._import_videos(dataset, dataset_path, file_paths)
                 elif dataset.dataset_type in ["single_control_image", "multi_control_image"]:
-                    if control_files and len(file_paths) == len(control_files):
-                        # 有控制图的情况：导入原图和控制图配对
-                        success_count = self._import_control_pairs(dataset, dataset_path, file_paths, control_files)
-                    else:
-                        # 没有控制图的情况：把文件作为原图导入，控制图位置留空
-                        success_count = self._import_control_originals(dataset, dataset_path, file_paths)
+                    # 控制图数据集：仅导入原图，控制图通过手动上传接口添加
+                    success_count = self._import_control_originals(dataset, dataset_path, file_paths)
                 else:
                     return 0, f"不支持的数据集类型: {dataset.dataset_type}"
 
@@ -477,61 +488,6 @@ class DatasetManager:
         
         return success_count
 
-    def _import_control_pairs(self, dataset: Dataset, dataset_path: Path, image_paths: List[str], control_paths: List[str]) -> int:
-        """导入控制图像配对"""
-        success_count = 0
-        targets_dir = dataset_path / "targets"
-        controls_dir = dataset_path / "controls"
-        
-        for image_path, control_path in zip(image_paths, control_paths):
-            try:
-                image_file = Path(image_path)
-                control_file = Path(control_path)
-                
-                if not (is_image_file(image_file) and is_image_file(control_file)):
-                    continue
-                
-                # 生成控制图像的索引
-                source_basename = image_file.stem
-                control_index = next_control_index(dataset_path, source_basename)
-                
-                # 生成文件名
-                image_name = safe_filename(image_file.name)
-                control_name = f"{source_basename}_{control_index}{control_file.suffix}"
-                
-                # 确保文件名唯一
-                image_name = generate_unique_name(targets_dir, image_name)
-                control_name = generate_unique_name(controls_dir, control_name)
-                
-                # 复制文件
-                target_dest = targets_dir / image_name
-                control_dest = controls_dir / control_name
-                
-                shutil.copy2(image_file, target_dest)
-                shutil.copy2(control_file, control_dest)
-                
-                # 检查目标图像是否有对应的标签文件（只检查目标图像）
-                label = ""
-                target_label_file = image_file.with_suffix('.txt')
-                if target_label_file.exists():
-                    try:
-                        label = target_label_file.read_text(encoding='utf-8').strip()
-                    except Exception as e:
-                        log_error(f"读取标签文件失败 {target_label_file}: {str(e)}")
-                
-                # 只为目标图像保存标签文件，控制图像不需要标签文件
-                if target_label_file.exists():
-                    target_label_dest = target_dest.with_suffix('.txt')
-                    atomic_write_text(target_label_dest, label)
-                
-                # 添加到数据集
-                dataset.add_item(image_name, label=label, control_image=control_name)
-                success_count += 1
-                
-            except Exception as e:
-                log_error(f"导入控制图像配对失败 {image_path}, {control_path}: {str(e)}")
-
-        return success_count
 
     def _import_control_originals(self, dataset: Dataset, dataset_path: Path, file_paths: List[str]) -> int:
         """导入控制图数据集的原图（不包含控制图）"""
@@ -584,7 +540,11 @@ class DatasetManager:
             try:
                 dataset = self.get_dataset(dataset_id)
                 if not dataset:
-                    raise DatasetNotFoundError(dataset_id)
+                    raise DatasetNotFoundError(
+                        message=f"数据集未找到: {dataset_id}",
+                        detail={"dataset_id": dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
 
                 # 更新数据集中的标签
                 if dataset.update_label(filename, label):
@@ -603,7 +563,11 @@ class DatasetManager:
             try:
                 dataset = self.get_dataset(dataset_id)
                 if not dataset:
-                    raise DatasetNotFoundError(dataset_id)
+                    raise DatasetNotFoundError(
+                        message=f"数据集未找到: {dataset_id}",
+                        detail={"dataset_id": dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
 
                 success_count = 0
 
@@ -629,7 +593,11 @@ class DatasetManager:
         try:
             dataset_info = self.datasets.get(dataset_id)
             if not dataset_info:
-                raise DatasetNotFoundError(dataset_id)
+                raise DatasetNotFoundError(
+                    message=f"数据集未找到: {dataset_id}",
+                    detail={"dataset_id": dataset_id},
+                    error_code="DATASET_NOT_FOUND",
+                )
 
             dataset = dataset_info['dataset']
             dataset_path = dataset_info['path']

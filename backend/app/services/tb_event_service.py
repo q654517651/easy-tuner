@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Any, Iterable, Optional
 from ..utils.logger import log_info, log_error
-from ..utils.tfrecord_reader import find_event_file_for_task, TFRecordReader
-from ..utils.tensorboard_proto import get_proto_parser
+from ..core.training.tensorboard.tfrecord_reader import find_event_file_for_task, TFRecordReader
+from ..core.training.tensorboard.tensorboard_proto import get_proto_parser
 
 ScalarPoint = Dict[str, float | int]
 

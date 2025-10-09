@@ -2,6 +2,11 @@
 
 declare global {
   interface Window {
+    // Electron 注入的后端端口（动态）
+    __BACKEND_PORT__?: number;
+    // 自定义 API 基址（可选）
+    __API_BASE__?: string;
+
     api: {
       // 获取应用版本信息
       getVersion(): Promise<{
@@ -34,6 +39,15 @@ declare global {
     electron?: {
       // 打开文件夹
       openFolder(taskId: string, kind: "sample" | "output"): Promise<{ ok: boolean; error?: string }>;
+      // 选择工作区目录
+      selectWorkspace(): Promise<{ canceled: boolean; path: string }>;
+    };
+
+    electronAPI?: {
+      // 通用 IPC invoke
+      invoke(channel: string, ...args: any[]): Promise<any>;
+      // 后端健康检查
+      checkBackendHealth(): Promise<{ ready: boolean; port: number }>;
     };
   }
 }

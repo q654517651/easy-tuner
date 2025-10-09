@@ -62,7 +62,7 @@ import {
   type SelectOption
 } from "../ui/HeroFormControls";
 import GroupCard from "../ui/GroupCard";
-import { trainingApi } from "../services/api";
+import { trainingApi, API_BASE_URL } from "../services/api";
 // import { BigInput, BigSelect, SwitchTile } from "../ui/Input";
 
 /* ========= 类型定义 ========= */
@@ -217,7 +217,7 @@ export default function CreateTask() {
       return; // 有缓存就不再请求
     }
 
-    fetch("/api/v1/training/models")
+    fetch(`${API_BASE_URL}/training/models`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((response) => {
         const list: ModelSummary[] = response.data;
@@ -255,7 +255,7 @@ export default function CreateTask() {
       }
     } catch {}
 
-    fetch(`/api/v1/training/config/${encodeURIComponent(typeName)}`)
+    fetch(`${API_BASE_URL}/training/config/${encodeURIComponent(typeName)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((response) => {
         if (reqId !== modelReqIdRef.current) return; // 非最新响应则忽略
@@ -297,7 +297,7 @@ export default function CreateTask() {
   useEffect(() => {
     // GPU数据获取
     if (_gpusCache === null) {
-      fetch("/api/v1/system/gpus")
+      fetch(`${API_BASE_URL}/system/gpus`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((response) => {
           const gpuList = response.data || [];
@@ -314,7 +314,7 @@ export default function CreateTask() {
 
     // 数据集数据获取
     if (_datasetsCache === null) {
-      fetch("/api/v1/datasets")
+      fetch(`${API_BASE_URL}/datasets`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((response) => {
           const datasetList = response.data || [];
@@ -442,13 +442,16 @@ export default function CreateTask() {
         output_dir: `workspace/trainings/${Date.now()}`
       };
 
+      console.log('[CreateTask] 开始预览 CLI 命令:', requestData);
       const response = await trainingApi.previewCliCommand(requestData);
+      console.log('[CreateTask] 预览 CLI 响应:', response);
       if (reqId === previewReqIdRef.current) {
         setPreviewData(response);
         setDisplayPreview(response);
       }
     } catch (error) {
       // 失败时保留旧的 displayPreview，不清空
+      console.error('[CreateTask] 预览 CLI 失败:', error);
     } finally {
       if (reqId === previewReqIdRef.current) setPreviewLoading(false);
     }
@@ -510,7 +513,7 @@ export default function CreateTask() {
         config: values
       };
 
-      const res = await fetch("/api/v1/training/tasks", {
+      const res = await fetch(`${API_BASE_URL}/training/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestData),
@@ -729,16 +732,16 @@ export default function CreateTask() {
         </Tabs>
       </div>
 
-      {/* 主体：左侧滚动设置 + 右侧绝对定位预览 */}
-      <div className="flex-1 min-h-0 overflow-hidden px-5 pb-5 relative">
-        <div className="h-full min-h-0 lg:pr-[440px]">
-          {/* 中间：设置区域（唯一滚动区） */}
+      {/* 主体：左右两列布局 */}
+      <div className="flex-1 min-h-0 overflow-hidden px-5 pb-5 flex gap-5">
+        {/* 左列：设置区域 */}
+        <div className="flex-1 min-h-0">
           <ScrollArea
             scrollerRef={scrollRef}
-            className="h-full min-h-0 pr-1 pl-px pt-px"
+            className="h-full min-h-0 pl-px pt-px"
             style={{ scrollPaddingTop: 20 }}
           >
-            <div className={`pe-3 ${gateReady ? "" : "relative"}`}>
+            <div className={gateReady ? "" : "relative"}>
             {error && <div className="text-[14px] text-red-600">{error}</div>}
 
             {/* 骨架屏层 - 绝对定位覆盖，调整位置匹配实际内容 */}
@@ -849,85 +852,53 @@ export default function CreateTask() {
             </div>
             </div>
           </ScrollArea>
+        </div>
 
-          {/* 右侧：训练脚本预览（绝对定位，不影响左侧滚动） */}
-          <div className="absolute top-0 right-5 w-[420px] h-full overflow-y-auto space-y-4 px-1 pt-1 pb-5 hidden lg:block">
-            {/* CLI命令预览 */}
-            <div className="rounded-2xl ring-1 ring-black/5 dark:ring-white/10 p-4">
-              <div className="text-[14px] font-semibold mb-3 flex items-center min-h-[28px]">
-                <span>训练脚本</span>
+        {/* 右列：训练脚本预览 */}
+        <div className="w-[420px] shrink-0 hidden lg:flex flex-col gap-4">
+            {/* 训练脚本预览 - 70%高度 */}
+            <div className="rounded-2xl p-6 flex flex-col" style={{ height: 'calc(70% - 8px)', backgroundColor: 'var(--bg2)' }}>
+              <div className="text-[14px] font-semibold mb-4 shrink-0">
+                训练脚本 (train script)
               </div>
-              <div className="relative">
-                {/* 骨架层（条件渲染） */}
-                {!displayPreview?.command && (
-                  <div className="bg-content2/50 p-3 rounded-lg">
-                    <div className="space-y-2">
+              <div className="flex-1 min-h-0 rounded-xl [border-width:1.5px] border-black/10 dark:border-white/5 bg-white dark:bg-[#2A2A2A] overflow-hidden">
+                <ScrollArea className="h-full">
+                  {!displayPreview?.command ? (
+                    <div className="p-3 space-y-2">
                       <Skeleton className="h-4 w-[85%] rounded" />
                       <Skeleton className="h-4 w-[90%] rounded" />
                       <Skeleton className="h-4 w-[80%] rounded" />
                       <Skeleton className="h-4 w-[70%] rounded" />
                       <Skeleton className="h-4 w-[60%] rounded" />
                     </div>
-                  </div>
-                )}
-                {/* 内容层（条件渲染） */}
-                {displayPreview?.command && (
-                  <div className={previewLoading ? "opacity-70" : "opacity-100"}>
-                    <pre className="text-[12px] whitespace-pre leading-5 font-mono bg-content2/50 p-3 rounded-lg">
+                  ) : (
+                    <pre className={`text-[12px] whitespace-pre leading-5 font-mono p-3 ${previewLoading ? "opacity-70" : "opacity-100"}`}>
                       {cliLines.length ? cliLines.join("\n") : "…"}
                     </pre>
-                  </div>
-                )}
+                  )}
+                </ScrollArea>
               </div>
             </div>
-            {/* TOML配置预览 */}
-            {displayPreview?.toml_content && (
-              <div className="rounded-2xl ring-1 ring-black/5 dark:ring-white/10 p-4">
-                <div className="text-[14px] font-semibold mb-3">
-                  数据集配置 (dataset.toml)
-                  {displayPreview.toml_path && (
-                    <span className="text-[12px] font-normal text-gray-500 block">
-                      {displayPreview.toml_path}
-                    </span>
-                  )}
-                </div>
-                <div className="max-h-[25vh] overflow-y-auto">
-                  <pre className="text-[12px] whitespace-pre leading-5 font-mono bg-content2/50 p-3 rounded-lg">
-                    {displayPreview.toml_content}
-                  </pre>
-                </div>
-              </div>
-            )}
 
-            {/* 批处理脚本预览（可选展开） */}
-            {displayPreview?.bat_script && (
-              <div className="rounded-2xl ring-1 ring-black/5 dark:ring-white/10 p-4">
-                <details className="group">
-                  <summary className="text-[14px] font-semibold mb-3 cursor-pointer hover:text-blue-600 transition-colors">
-                    Windows批处理脚本
-                    <span className="text-[12px] font-normal text-gray-500 ml-2">
-                      (点击展开)
-                    </span>
-                  </summary>
-                  <div className="max-h-[30vh] overflow-y-auto mt-2">
-                    <pre className="text-[12px] whitespace-pre leading-5 font-mono bg-content2/50 p-3 rounded-lg">
-                      {displayPreview.bat_script}
+            {/* 数据集配置预览 - 30%高度 */}
+            <div className="rounded-2xl p-6 flex flex-col" style={{ height: 'calc(30% - 8px)', backgroundColor: 'var(--bg2)' }}>
+              <div className="text-[14px] font-semibold mb-4 shrink-0">
+                数据集配置 (dataset.toml)
+              </div>
+              <div className="flex-1 min-h-0 rounded-xl [border-width:1.5px] border-black/10 dark:border-white/5 bg-white dark:bg-[#2A2A2A] overflow-hidden">
+                <ScrollArea className="h-full">
+                  {displayPreview?.toml_content ? (
+                    <pre className="text-[12px] whitespace-pre leading-5 font-mono p-3">
+                      {displayPreview.toml_content}
                     </pre>
-                  </div>
-                </details>
+                  ) : (
+                    <div className="p-3 text-[12px] text-gray-500">
+                      等待配置加载...
+                    </div>
+                  )}
+                </ScrollArea>
               </div>
-            )}
-
-            {/* 工作目录信息 */}
-            {displayPreview?.working_directory && (
-              <div className="rounded-2xl ring-1 ring-black/5 dark:ring-white/10 p-4">
-                <div className="text-[14px] font-semibold mb-2">工作目录</div>
-                <div className="text-[12px] text-gray-600 font-mono">
-                  {displayPreview.working_directory}
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
         </div>
       </div>
     </div>

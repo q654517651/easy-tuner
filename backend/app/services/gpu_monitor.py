@@ -6,10 +6,9 @@ import subprocess
 import json
 import logging
 from typing import List, Optional, Dict, Any
-from dataclasses import asdict
 from datetime import datetime
 
-from ..models.system import GPUMetrics, GPUError
+from ..models.system import GPUMetrics
 
 logger = logging.getLogger(__name__)
 

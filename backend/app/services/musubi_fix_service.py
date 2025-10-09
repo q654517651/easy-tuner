@@ -19,26 +19,15 @@ class MusubiFixService:
     """Musubi训练器修复服务"""
 
     def __init__(self):
-        # 优化项目根路径推导逻辑 - 支持环境变量覆盖
-        if "TAGTRAGGER_ROOT" in os.environ:
-            self.project_root = Path(os.environ["TAGTRAGGER_ROOT"])
-        else:
-            # 从当前文件位置向上查找项目根
-            current_file = Path(__file__).resolve()
-            project_root = current_file
-            while project_root.parent != project_root:
-                if (project_root / "runtime" / "setup_portable_uv.ps1").exists():
-                    break
-                project_root = project_root.parent
-            else:
-                # 最后fallback到工作目录
-                project_root = Path.cwd()
-            self.project_root = project_root
+        # 使用全局环境管理器获取路径
+        from ..core.environment import get_paths
 
-        self.runtime_dir = self.project_root / "runtime"
-        self.python_dir = self.runtime_dir / "python"
-        self.musubi_dir = self.runtime_dir / "engines" / "musubi-tuner"
-        self.setup_script = self.runtime_dir / "setup_portable_uv.ps1"
+        paths = get_paths()
+        self.project_root = paths.project_root
+        self.runtime_dir = paths.runtime_dir
+        self.python_dir = paths.runtime_dir / "python"
+        self.musubi_dir = paths.musubi_dir
+        self.setup_script = paths.setup_script
 
     async def _detect_powershell(self) -> str:
         """检测可用的PowerShell版本"""

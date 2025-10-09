@@ -168,7 +168,7 @@ export default function TagManager({ datasetId, mediaItems, onTagsUpdated }: Tag
 
   return (
     <div className="flex h-full min-h-0 px-4 pt-1 pb-4">
-      <div className="flex w-full h-full rounded-2xl ring-1 ring-black/5 dark:ring-white/10 overflow-hidden">
+      <div className="flex w-full h-full rounded-2xl overflow-hidden" style={{ backgroundColor: 'var(--bg2)' }}>
         {/* 左侧：图片列表 - 20% */}
         <div className="w-[20%] min-h-0">
           <ImageThumbnailList

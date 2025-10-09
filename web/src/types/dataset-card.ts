@@ -33,6 +33,7 @@ export type SingleControlCardProps = BaseCardProps & {
   mediaType: 'single_control_image';
   controlImages: Array<ControlImage>; // 长度 ≤ 1
   onUploadControl?: (slotIndex: 1) => void;
+  onDeleteControl?: (slotIndex: 1) => void;
 };
 
 // 多图控制卡片 props
@@ -40,6 +41,7 @@ export type MultiControlCardProps = BaseCardProps & {
   mediaType: 'multi_control_image';
   controlImages: Array<ControlImage>; // 长度 ≤ 3
   onUploadControl?: (slotIndex: 1 | 2 | 3) => void;
+  onDeleteControl?: (slotIndex: 1 | 2 | 3) => void;
 };
 
 // 可辨识联合类型
@@ -52,6 +54,7 @@ export interface MediaDisplayProps {
   filename: string;
   controlImages?: Array<ControlImage>;
   onUploadControl?: (slotIndex: 1 | 2 | 3) => void;
+  onDeleteControl?: (slotIndex: 1 | 2 | 3) => void;
   // 选中相关
   selected?: boolean;
   labeling?: boolean;

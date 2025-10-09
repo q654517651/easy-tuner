@@ -5,6 +5,7 @@ TFRecord 读取器 - 直接解析 events.out.tfevents.* 文件
 import struct
 from typing import Iterator, Optional
 from pathlib import Path
+from backend.app.utils.logger import log_info, log_warn, log_error
 
 
 def crc32c(data: bytes) -> int:
@@ -47,7 +48,7 @@ class TFRecordReader:
                     if self.verify_crc:
                         expected_crc = crc32c(length_data)
                         if len_crc != expected_crc:
-                            print(f"长度CRC校验失败: expected={expected_crc}, got={len_crc}")
+                            log_warn(f"长度CRC校验失败: expected={expected_crc}, got={len_crc}")
                             continue
 
                     # 读取payload
@@ -66,13 +67,13 @@ class TFRecordReader:
                     if self.verify_crc:
                         expected_crc = crc32c(payload)
                         if payload_crc != expected_crc:
-                            print(f"Payload CRC校验失败: expected={expected_crc}, got={payload_crc}")
+                            log_warn(f"Payload CRC校验失败: expected={expected_crc}, got={payload_crc}")
                             continue
 
                     yield payload
 
         except (IOError, struct.error) as e:
-            print(f"读取TFRecord文件失败 {self.file_path}: {e}")
+            log_error(f"读取TFRecord文件失败 {self.file_path}", exc=e)
             return
 
 
@@ -127,5 +128,5 @@ def find_event_file_for_task(workspace: Path, task_id: str) -> Optional[Path]:
         return None
 
     except Exception as e:
-        print(f"查找事件文件失败: {e}")
+        log_error("查找事件文件失败", exc=e)
         return None

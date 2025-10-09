@@ -1,109 +1,127 @@
 """
-异常处理模块
+异常处理模块（统一错误响应约定）
 """
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from typing import Any, Optional
 import logging
 import traceback
+
 
 logger = logging.getLogger(__name__)
 
 
 class APIException(Exception):
-    """API基础异常类"""
-    def __init__(self, message: str, status_code: int = 500, detail: str = None):
+    """API 层通用异常基类（前端友好响应）。"""
+
+    status_code: int = 400
+    error: str = "ApplicationError"  # 短码，默认由类名推导
+
+    def __init__(
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        detail: Any = None,
+        error_code: Optional[str] = None,
+        error: Optional[str] = None,
+    ):
         self.message = message
-        self.status_code = status_code
+        if status_code is not None:
+            self.status_code = status_code
         self.detail = detail
+        self.error_code = error_code
+        if error is not None:
+            self.error = error
+        else:
+            # 根据类名推导短码（去除 Error/Exception 后缀）
+            name = self.__class__.__name__
+            for suf in ("Error", "Exception"):
+                if name.endswith(suf):
+                    name = name[: -len(suf)]
+                    break
+            self.error = name or "ApplicationError"
         super().__init__(message)
 
 
 class DatasetNotFoundError(APIException):
-    """数据集未找到异常"""
-    def __init__(self, dataset_id: str):
-        super().__init__(f"数据集未找到: {dataset_id}", 404)
+    def __init__(self, message: Optional[str] = None, detail: Any = None, error_code: Optional[str] = None):
+        super().__init__(message or "Dataset not found", status_code=404, detail=detail, error_code=error_code, error="DatasetNotFound")
 
 
-class TrainingTaskNotFoundError(APIException):
-    """训练任务未找到异常"""
-    def __init__(self, task_id: str):
-        super().__init__(f"训练任务未找到: {task_id}", 404)
+class TrainingNotFoundError(APIException):
+    def __init__(self, message: Optional[str] = None, detail: Any = None, error_code: Optional[str] = None):
+        super().__init__(message or "Training task not found", status_code=404, detail=detail, error_code=error_code, error="TrainingNotFound")
 
 
 class ValidationError(APIException):
-    """数据验证异常"""
-    def __init__(self, message: str, detail: str = None):
-        super().__init__(message, 400, detail)
+    def __init__(self, message: str, detail: Any = None, error_code: Optional[str] = None):
+        super().__init__(message, status_code=400, detail=detail, error_code=error_code, error="ValidationError")
 
 
 class LabelingError(APIException):
-    """打标服务异常"""
-    def __init__(self, message: str, detail: str = None):
-        super().__init__(message, 500, detail)
+    def __init__(self, message: str, detail: Any = None, error_code: Optional[str] = None):
+        super().__init__(message, status_code=500, detail=detail, error_code=error_code, error="LabelingError")
 
 
 class TrainingError(APIException):
-    """训练异常"""
-    def __init__(self, message: str, detail: str = None):
-        super().__init__(message, 500, detail)
+    def __init__(self, message: str, detail: Any = None, error_code: Optional[str] = None):
+        super().__init__(message, status_code=500, detail=detail, error_code=error_code, error="TrainingError")
 
 
 def setup_exception_handlers(app: FastAPI):
-    """设置全局异常处理器"""
-    
+    """安装全局异常处理器，输出统一响应结构。"""
+
     @app.exception_handler(APIException)
     async def api_exception_handler(request: Request, exc: APIException):
-        """处理自定义API异常"""
-        logger.error(f"API异常: {exc.message}")
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={
-                "error": True,
-                "message": exc.message,
-                "detail": exc.detail,
-                "type": exc.__class__.__name__
-            }
-        )
-    
+        logger.error("APIException: %s", exc.message)
+        content = {
+            "error": getattr(exc, "error", "ApplicationError"),
+            "message": exc.message,
+            "detail": exc.detail,
+            "type": "application_error",
+        }
+        if getattr(exc, "error_code", None):
+            content["error_code"] = exc.error_code
+        return JSONResponse(status_code=exc.status_code, content=content)
+
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-        """处理HTTP异常"""
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "error": True,
+                "error": "HTTPError",
                 "message": exc.detail,
-                "type": "HTTPException"
-            }
+                "detail": None,
+                "type": "application_error",
+            },
         )
-    
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        """处理请求验证异常"""
         return JSONResponse(
             status_code=422,
             content={
-                "error": True,
-                "message": "请求数据验证失败",
+                "error": "ValidationError",
+                "message": "请求参数校验失败",
                 "detail": exc.errors(),
-                "type": "ValidationError"
-            }
+                "type": "application_error",
+            },
         )
-    
+
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
-        """处理未捕获的异常"""
-        logger.error(f"未处理异常: {str(exc)}")
+        logger.error("未处理异常: %s", str(exc))
         logger.error(traceback.format_exc())
         return JSONResponse(
             status_code=500,
             content={
-                "error": True,
+                "error": "InternalServerError",
                 "message": "服务器内部错误",
-                "detail": str(exc) if app.debug else None,
-                "type": "InternalServerError"
-            }
+                "detail": str(exc) if getattr(app, "debug", False) else None,
+                "type": "application_error",
+            },
         )
+

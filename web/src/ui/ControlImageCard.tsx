@@ -106,6 +106,7 @@ export function ControlImageCard({
             onUploadControl(index as 1 | 2 | 3);
           }
         }}
+        controlType="multi_control_image"
       />
     </div>
   );

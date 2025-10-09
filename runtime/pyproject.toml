@@ -1,8 +1,7 @@
 [project]
-name = "musubi-tuner"
+name = "tagtragger-runtime"
 version = "0.1.0"
-description = "Musubi Tuner by kohya_ss"
-readme = "README.md"
+description = "TagTragger Runtime Dependencies"
 requires-python = ">=3.10, <3.13"
 dependencies = [
     "accelerate",
@@ -35,16 +34,6 @@ cu128 = [
     "torch>=2.7.1",
     "torchvision>=0.22.1",
 ]
-
-[tool.uv]
-conflicts = [
-  [
-    { extra = "cu124" },
-    { extra = "cu128" },
-  ],
-]
-
-[dependency-groups]
 dev = [
   "ascii-magic==2.3.0",
   "matplotlib==3.10.0",

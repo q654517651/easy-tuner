@@ -695,7 +695,7 @@ class QwenImageEditConfig(BaseTrainingConfig):
             "group": ParameterGroup.PATH.key,
             "label": "DiT 模型路径",
             "widget": "file_picker",
-            "help": "Qwen-Image DiT模型文件路径",
+            "help": "Qwen-Image Edit模型文件路径",
             "cli": {"name": "--dit", "type": "value", "formatter": "path"},
             "ui_hidden": False, "persist": True
         }
@@ -791,7 +791,7 @@ class Wan21(BaseTrainingConfig):
         default="",
         metadata={
             "group": ParameterGroup.PATH.key,
-            "label": "DiT 模型路径",
+            "label": "Wan2.1 模型路径",
             "widget": "file_picker",
             "help": "Qwen-Image DiT模型文件路径",
             "cli": {"name": "--dit", "type": "value", "formatter": "path"},
@@ -809,11 +809,11 @@ class Wan21(BaseTrainingConfig):
             "ui_hidden": False, "persist": True
         }
     )
-    text_encoder_path: str = field(
+    t5_path: str = field(
         default="",
         metadata={
             "group": ParameterGroup.PATH.key,
-            "label": "文本编码器路径(T5-XXL)",
+            "label": "T5-XXL 模型路径",
             "widget": "file_picker",
             "help": "T5-XXL文件路径",
             "cli": {"name": "--t5", "type": "value", "formatter": "path"},
@@ -844,7 +844,7 @@ class Wan22(BaseTrainingConfig):
             "group": ParameterGroup.PATH.key,
             "label": "DiT 模型路径",
             "widget": "file_picker",
-            "help": "Qwen-Image DiT模型文件路径",
+            "help": "wan2.2模型文件路径",
             "cli": {"name": "--dit", "type": "value", "formatter": "path"},
             "ui_hidden": False, "persist": True
         }
@@ -860,11 +860,11 @@ class Wan22(BaseTrainingConfig):
             "ui_hidden": False, "persist": True
         }
     )
-    text_encoder_path: str = field(
+    t5_path: str = field(
         default="",
         metadata={
             "group": ParameterGroup.PATH.key,
-            "label": "文本编码器路径(T5-XXL)",
+            "label": "T5-XXL 模型路径",
             "widget": "file_picker",
             "help": "T5-XXL文件路径",
             "cli": {"name": "--t5", "type": "value", "formatter": "path"},
@@ -873,7 +873,7 @@ class Wan22(BaseTrainingConfig):
     )
 
     task: str = field(
-        default="adamw8bit",
+        default="t2v-A14B",
         metadata={
             "group": ParameterGroup.BASIC.key,
             "label": "任务类型",
@@ -1276,9 +1276,9 @@ register_model(ModelSpec(
         ParameterGroup.ADVANCED.key,
     ],
     path_mapping={
-        "dit_path": "model_paths.qwen_image.dit_path",
-        "vae_path": "model_paths.qwen_image.vae_path",
-        "text_encoder_path": "model_paths.qwen_image.text_encoder_path"
+        "dit_path": "model_paths.qwen_image_edit.dit_path",
+        "vae_path": "model_paths.qwen_image_edit.vae_path",
+        "text_encoder_path": "model_paths.qwen_image_edit.text_encoder_path"
     },
     cache_steps=[
         CacheStep(
@@ -1315,10 +1315,10 @@ register_model(ModelSpec(
         ParameterGroup.ADVANCED.key,
     ],
     path_mapping={
-        "dit_path": "model_paths.flux.dit_path",
-        "vae_path": "model_paths.flux.vae_path",
-        "text_encoder1_path": "model_paths.flux.text_encoder1_path",
-        "text_encoder2_path": "model_paths.flux.text_encoder2_path"
+        "dit_path": "model_paths.flux_kontext.dit_path",
+        "vae_path": "model_paths.flux_kontext.vae_path",
+        "text_encoder1_path": "model_paths.flux_kontext.text_encoder1_path",
+        "text_encoder2_path": "model_paths.flux_kontext.text_encoder2_path"
     },
     cache_steps=[
         CacheStep(
@@ -1343,7 +1343,7 @@ register_model(ModelSpec(
 ))
 
 register_model(ModelSpec(
-    type_name="Wan2.1",
+    type_name="Wan_2_1",
     title="Wan2.1",
     config_cls=Wan21,
     script_train="wan_train_network.py",
@@ -1358,16 +1358,16 @@ register_model(ModelSpec(
         ParameterGroup.ADVANCED.key,
     ],
     path_mapping={
-        "dit_path": "model_paths.wan21.dit_path",
-        "vae_path": "model_paths.wan21.vae_path",
-        "t5": "model_paths.wan21.text_encoder_path",
+        "dit_path": "model_paths.Wan_2_1.dit_path",
+        "vae_path": "model_paths.Wan_2_1.vae_path",
+        "t5_path": "model_paths.Wan_2_1.t5_path",
     },
     cache_steps=[
         CacheStep(
             name="cache_text_encoder_outputs",
             script="wan_cache_text_encoder_outputs.py",
             args_template=["--dataset_config", "{dataset_toml}",
-                           "--t5", "{text_encoder1_path}",
+                           "--t5", "{t5_path}",
                            "--batch_size", "16",
                            "--logging_dir", "{cache_logs_dir}"]
         ),
@@ -1385,7 +1385,7 @@ register_model(ModelSpec(
 
 
 register_model(ModelSpec(
-    type_name="Wan2.2",
+    type_name="Wan_2_2",
     title="Wan2.2",
     config_cls=Wan22,
     script_train="wan_train_network.py",
@@ -1400,16 +1400,16 @@ register_model(ModelSpec(
         ParameterGroup.ADVANCED.key,
     ],
     path_mapping={
-        "dit_path": "model_paths.wan22.dit_path",
-        "vae_path": "model_paths.wan22.vae_path",
-        "t5": "model_paths.wan22.text_encoder_path",
+        "dit_path": "model_paths.Wan_2_2.dit_path",
+        "vae_path": "model_paths.Wan_2_2.vae_path",
+        "t5_path": "model_paths.Wan_2_2.t5_path",
     },
     cache_steps=[
         CacheStep(
             name="cache_text_encoder_outputs",
             script="wan_cache_text_encoder_outputs.py",
             args_template=["--dataset_config", "{dataset_toml}",
-                           "--t5", "{text_encoder1_path}",
+                           "--t5", "{t5_path}",
                            "--batch_size", "16",
                            "--logging_dir", "{cache_logs_dir}"]
         ),

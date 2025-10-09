@@ -41,7 +41,9 @@ export interface HeroInputProps {
   className?: string;
   isRequired?: boolean;
   isInvalid?: boolean;
+  isDisabled?: boolean;
   errorMessage?: string;
+  labelPlacement?: "inside" | "outside-top";
 }
 
 // export const HeroInput: React.FC<HeroInputProps> = ({
@@ -94,13 +96,15 @@ export const HeroInput: React.FC<HeroInputProps> = ({
   className,
   isRequired = false,
   isInvalid = false,
+  isDisabled = false,
   errorMessage,
+  labelPlacement = "inside",
 }) => (
   <Input
     size="md"
     type={type}
-    // inside 是默认，不改
     label={label}
+    labelPlacement={labelPlacement === "outside-top" ? "outside" : labelPlacement}
     placeholder={placeholder || (typeof label === "string" ? label : undefined)}
     value={String(value ?? "")}
     min={min}
@@ -108,20 +112,24 @@ export const HeroInput: React.FC<HeroInputProps> = ({
     step={step}
     isRequired={isRequired}
     isInvalid={isInvalid}
+    isDisabled={isDisabled}
     errorMessage={errorMessage}
     className={className}
-    // classNames={{
-    //   inputWrapper:"shadow-none bg-white dark:bg-[#2A2A2A] border border-black/10 dark:border-white/5 px-5 !py-4 " +
-    //       "h-auto !hover:bg-transparent data-[hover=true]:!bg-transparent focus-within:!bg-transparent",
-    //   label:"h-7 h-auto !text-default-400",
-    //   innerWrapper:"h-7 mt-7",
-    // }}
-    classNames={{
-      inputWrapper:"shadow-none bg-white dark:bg-[#2A2A2A] border border-black/10 dark:border-white/5 px-4 !py-3 " +
-          "h-auto !hover:bg-transparent data-[hover=true]:!bg-transparent focus-within:!bg-transparent",
-      label:"h-6 h-auto !text-default-400",
-      innerWrapper:"h-6 mt-6",
-    }}
+    classNames={
+      labelPlacement === "inside"
+        ? {
+            inputWrapper:"shadow-none bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 !py-3 h-auto " +
+                "hover:bg-black/4 dark:hover:bg-white/4 data-[hover=true]:bg-black/4 dark:data-[hover=true]:bg-white/4",
+            label:"h-6 h-auto !text-default-400",
+            innerWrapper:"h-6 mt-6",
+          }
+        : {
+            mainWrapper: "pt-6",
+            inputWrapper:"shadow-none bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 py-2.5 h-auto " +
+                "hover:bg-black/4 dark:hover:bg-white/4 data-[hover=true]:bg-black/4 dark:data-[hover=true]:bg-white/4",
+            label:"!text-default-400 text-sm",
+          }
+    }
     onChange={(e) => {
       const raw = e.target.value;
       if (type === "number") onChange?.(raw === "" ? "" : Number(raw));
@@ -149,6 +157,7 @@ export interface HeroSelectProps {
   errorMessage?: string;
   disabledKeys?: string[];
   description?: string;
+  labelPlacement?: "inside" | "outside-top";
 }
 
 export const HeroSelect: React.FC<HeroSelectProps> = ({
@@ -162,11 +171,13 @@ export const HeroSelect: React.FC<HeroSelectProps> = ({
   isInvalid = false,
   errorMessage,
   disabledKeys = [],
-  description
+  description,
+  labelPlacement = "inside",
 }) => (
   <Select
-    size="lg"
+    size="md"
     label={label}
+    labelPlacement={labelPlacement === "outside-top" ? "outside" : labelPlacement}
     placeholder={placeholder || label}
     selectedKeys={value ? [String(value)] : []}
     disabledKeys={disabledKeys}
@@ -175,12 +186,21 @@ export const HeroSelect: React.FC<HeroSelectProps> = ({
     errorMessage={errorMessage}
     description={description}
     className={className}
-      classNames={{
-      trigger:"shadow-none bg-white dark:bg-[#2A2A2A] border border-black/10 dark:border-white/5 px-4 !py-3 " +
-          "h-auto !hover:bg-transparent data-[hover=true]:!bg-transparent focus-within:!bg-transparent",
-      label:"h-6 h-auto !text-default-400",
-      innerWrapper:"h-6 mt-6 !pt-0",
-    }}
+    classNames={
+      labelPlacement === "inside"
+        ? {
+            trigger:"shadow-none bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 !py-3 h-auto " +
+                "hover:bg-black/4 dark:hover:bg-white/4 data-[hover=true]:bg-black/4 dark:data-[hover=true]:bg-white/4",
+            label:"h-6 h-auto !text-default-400",
+            innerWrapper:"h-6 mt-6 !pt-0",
+          }
+        : {
+            mainWrapper: "pt-6",
+            trigger:"shadow-none bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 py-2.5 h-auto " +
+                "hover:bg-black/4 dark:hover:bg-white/4 data-[hover=true]:bg-black/4 dark:data-[hover=true]:bg-white/4",
+            label:"!text-default-400 text-sm",
+          }
+    }
     onSelectionChange={(keys) => {
       const selectedKey = Array.from(keys)[0];
       if (selectedKey) {
@@ -216,19 +236,17 @@ export const HeroSwitch: React.FC<HeroSwitchProps> = ({
   className,
   description
 }) => (
-  <div className={className}>
-    <Switch
-      size="lg"
-      isSelected={checked}
-      onValueChange={onChange}
-    >
-      <div className="flex flex-col">
-        <span className="text-medium">{label}</span>
-        {description && (
-          <span className="text-small text-default-400">{description}</span>
-        )}
-      </div>
-    </Switch>
+  <div
+    className={`bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 rounded-xl hover:bg-black/4 dark:hover:bg-white/4 transition-colors ${className || ''}`}
+  >
+    <div className="flex flex-col gap-2 py-3">
+      <label className="text-xs text-default-400">{label}</label>
+      <Switch
+        size="sm"
+        isSelected={checked}
+        onValueChange={onChange}
+      />
+    </div>
   </div>
 );
 
@@ -259,7 +277,7 @@ export const HeroTextarea: React.FC<HeroTextareaProps> = ({
   errorMessage
 }) => (
   <Textarea
-    size="lg"
+    size="md"
     label={label}
     placeholder={placeholder || label}
     value={value || ""}
@@ -268,6 +286,9 @@ export const HeroTextarea: React.FC<HeroTextareaProps> = ({
     isInvalid={isInvalid}
     errorMessage={errorMessage}
     className={className}
+    classNames={{
+      inputWrapper: "shadow-none"
+    }}
     onChange={(e) => onChange(e.target.value)}
   />
 );

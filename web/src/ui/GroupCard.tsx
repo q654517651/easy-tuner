@@ -5,18 +5,20 @@ const GroupCard: React.FC<React.PropsWithChildren<{
   title: string;
   anchorId?: string;
   headerContent?: React.ReactNode;
+  noGrid?: boolean;
 }>> = ({
   title,
   anchorId,
   headerContent,
+  noGrid = false,
   children,
 }) => (
-  <div id={anchorId} className="rounded-2xl p-6 bg-[#F9F9FA] dark:bg-white/4 overflow-hidden">
+  <div id={anchorId} className="rounded-2xl p-6 overflow-hidden" style={{ backgroundColor: 'var(--bg2)' }}>
     <div className="flex items-center justify-between mb-4">
       <div className="text-[14px] font-semibold">{title}</div>
       {headerContent && <div>{headerContent}</div>}
     </div>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+    <div className={noGrid ? "" : "grid grid-cols-1 md:grid-cols-2 gap-4"}>{children}</div>
   </div>
 );
 

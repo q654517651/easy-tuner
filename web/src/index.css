@@ -10,12 +10,18 @@
   --titlebar-fg: #111111;
   --titlebar-hover: rgba(0,0,0,0.06);
   --titlebar-danger: #dc2626; /* bg-red-600 */
+
+  /* 通用背景色 */
+  --bg2: #F4F4F6; /* 次级背景色 */
 }
 .dark {
   --titlebar-bg: #000000; /* 纯黑色 */
   --titlebar-fg: #ffffff;
   --titlebar-hover: rgba(255,255,255,0.12);
   --titlebar-danger: #dc2626; /* bg-red-600 */
+
+  /* 通用背景色 */
+  --bg2: rgba(255, 255, 255, 0.04); /* 深色模式下的次级背景色 */
 }
 
 /* 容器与布局 */

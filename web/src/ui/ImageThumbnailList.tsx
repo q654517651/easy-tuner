@@ -55,10 +55,18 @@ function ThumbnailItem({ image, isSelected, onClick }: ThumbnailItemProps) {
         />
       ) : (
         <Image
-          alt={image.filename}
-          className="object-cover aspect-square w-full"
+          alt={image.filename || "image"}
           src={image.url}
-          loading="lazy"
+          radius="lg"
+          classNames={{
+            wrapper: "relative rounded-large aspect-square w-full shadow-none",
+            img: "object-cover w-full h-full opacity-0 data-[loaded=true]:opacity-100 transition-opacity duration-300",
+          }}
+          loading="eager"
+          fallbackSrc="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA="
+          onLoad={() => {/* 可选：埋点/日志 */}}
+          onError={() => {/* 可选：上报 */}}
+          removeWrapper
         />
       )}
 

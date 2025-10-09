@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Tabs, Tab, Button, CircularProgress, addToast, Skeleton } from "@heroui/react";
+import { Tabs, Tab, CircularProgress, addToast, Skeleton, Input } from "@heroui/react";
 import HeaderBar from "../ui/HeaderBar";
 import { DatasetCard } from "../ui/dataset-card";
+import { CropCard } from "../ui/dataset-card/CropCard";
+import { AppButton } from "../ui/primitives/Button";
 import { convertToDatasetCardProps } from "../utils/dataset-card-adapter";
 import TagManager from "../components/TagManager";
-import { datasetApi, labelingApi, joinApiUrl } from "../services/api";
+import { datasetApi, labelingApi, joinApiUrl, API_BASE_URL } from "../services/api";
 import EmptyState from "../ui/EmptyState";
 import EmptyImg from "../assets/img/EmptyDataset.png?inline";
+import { PageLayout } from "../layouts/PageLayout";
 
 interface MediaItem {
   id: string;
@@ -45,6 +48,11 @@ export default function DatasetDetail() {
   const [batchLabeling, setBatchLabeling] = useState(false);
   const [labelingItems, setLabelingItems] = useState<Set<string>>(new Set());
   const [labelingProgress, setLabelingProgress] = useState(0);
+
+  // 裁剪相关状态
+  const [cropWidth, setCropWidth] = useState(1024);
+  const [cropHeight, setCropHeight] = useState(1024);
+  const [cropping, setCropping] = useState(false);
 
   // 当ID变化时立即重置状态（同步操作，确保骨架屏立即显示）
   useEffect(() => {
@@ -241,7 +249,7 @@ export default function DatasetDetail() {
         formData.append('control_file', file);
 
         // 调用上传API
-        const response = await fetch(`http://localhost:8000/api/v1/datasets/${id}/control-images`, {
+        const response = await fetch(`${API_BASE_URL}/datasets/${id}/control-images`, {
           method: 'POST',
           body: formData
         });
@@ -267,7 +275,7 @@ export default function DatasetDetail() {
           const mediaItems = updatedDataset.media_items.map(item => ({
             id: item.id,
             filename: item.filename,
-            url: `http://localhost:8000${item.url}`,
+            url: joinApiUrl(item.url),
             caption: item.caption || "",
             control_images: item.control_images
           }));
@@ -364,13 +372,35 @@ export default function DatasetDetail() {
       setSelectedItems(new Set());
       setLabelingProgress(0);
 
-      // 显示完成通知
-      addToast({
-        title: "打标完成",
-        description: `成功打标图片 ${successCount} 张`,
-        color: "success",
-        timeout: 3000,
-      });
+      // 显示完成通知，根据成功数量判断结果
+      const totalCount = selectedItemsList.length;
+      const failedCount = totalCount - successCount;
+
+      if (successCount === 0) {
+        // 全部失败
+        addToast({
+          title: "打标失败",
+          description: `全部 ${totalCount} 张图片打标失败`,
+          color: "danger",
+          timeout: 3000,
+        });
+      } else if (failedCount === 0) {
+        // 全部成功
+        addToast({
+          title: "打标完成",
+          description: `成功打标 ${successCount} 张图片`,
+          color: "success",
+          timeout: 3000,
+        });
+      } else {
+        // 部分成功
+        addToast({
+          title: "打标完成",
+          description: `成功 ${successCount} 张，失败 ${failedCount} 张`,
+          color: "warning",
+          timeout: 3000,
+        });
+      }
     }
   };
 
@@ -410,7 +440,7 @@ export default function DatasetDetail() {
           const mediaItems = updatedDataset.media_items.map(item => ({
             id: item.id,
             filename: item.filename,
-            url: `http://localhost:8000${item.url}`,
+            url: joinApiUrl(item.url),
             caption: item.caption || "",
             control_images: item.control_images
           }));
@@ -500,29 +530,29 @@ export default function DatasetDetail() {
           <Tab key="cropping" title="图片裁剪" />
         </Tabs>
 
-        {selectedTab === "labeling" && (
+        {selectedTab === "labeling" && dataset?.type === "image" && (
           <div className="flex items-center gap-2">
             {items.length > 0 && (
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg border border-blue-200">
-                <span className="text-sm text-blue-700">已选择 {selectedItems.size} 项</span>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg2)] rounded-lg border border-black/10 dark:border-white/10">
+                <span className="text-sm text-foreground">已选择 {selectedItems.size} 项</span>
                 <button
                   onClick={() => setSelectedItems(new Set(items.map(item => item.id)))}
-                  className="text-xs text-blue-600 hover:text-blue-800"
+                  className="text-xs text-primary hover:text-primary-600 dark:hover:text-primary-400"
                   disabled={batchLabeling}
                 >
                   全选
                 </button>
                 <button
                   onClick={() => setSelectedItems(new Set())}
-                  className="text-xs text-blue-600 hover:text-blue-800"
+                  className="text-xs text-primary hover:text-primary-600 dark:hover:text-primary-400"
                   disabled={batchLabeling}
                 >
                   清除
                 </button>
               </div>
             )}
-            <Button
-              variant="bordered"
+            <AppButton
+              kind="outlined"
               size="sm"
               onPress={() => {
                 // TODO: 打标设置逻辑
@@ -530,15 +560,15 @@ export default function DatasetDetail() {
               }}
             >
               打标设置
-            </Button>
-            <Button
-              variant="solid"
+            </AppButton>
+            <AppButton
+              kind="filled"
               size="sm"
               color="primary"
               isDisabled={selectedItems.size === 0 || batchLabeling}
               isLoading={batchLabeling}
               onPress={handleBatchLabeling}
-              startContent={
+              startIcon={
                 batchLabeling ? (
                   <CircularProgress
                     size="sm"
@@ -555,7 +585,52 @@ export default function DatasetDetail() {
               }
             >
               {batchLabeling ? '正在打标...' : '批量打标'}
-            </Button>
+            </AppButton>
+          </div>
+        )}
+
+        {selectedTab === "cropping" && dataset?.type === "image" && (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-default-600">目标尺寸：</span>
+              <Input
+                type="number"
+                value={String(cropWidth)}
+                onChange={(e) => setCropWidth(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-24"
+                size="sm"
+                placeholder="宽度"
+                min={1}
+              />
+              <span className="text-sm text-default-400">×</span>
+              <Input
+                type="number"
+                value={String(cropHeight)}
+                onChange={(e) => setCropHeight(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-24"
+                size="sm"
+                placeholder="高度"
+                min={1}
+              />
+            </div>
+            <AppButton
+              kind="filled"
+              color="primary"
+              size="sm"
+              isDisabled={cropping}
+              isLoading={cropping}
+              onPress={() => {
+                // TODO: 批量裁剪逻辑
+                addToast({
+                  title: "裁剪功能开发中",
+                  description: "后端接口待完善",
+                  color: "warning",
+                  timeout: 2000,
+                });
+              }}
+            >
+              {cropping ? '正在裁剪...' : '确认裁剪'}
+            </AppButton>
           </div>
         )}
       </div>
@@ -619,7 +694,7 @@ export default function DatasetDetail() {
                             const mediaItems = data.media_items.map(item => ({
                               id: item.id,
                               filename: item.filename,
-                              url: `http://localhost:8000${item.url}`,
+                              url: joinApiUrl(item.url),
                               caption: item.caption || "",
                               control_images: item.control_images
                             }));
@@ -665,9 +740,26 @@ export default function DatasetDetail() {
                   </div>
                 </div>
 
-                {/* 图片裁剪页面占位 */}
-                <div className={`h-full flex items-center justify-center ${selectedTab === "cropping" ? "block" : "hidden"}`}>
-                  <div className="text-gray-500">图片裁剪功能正在开发中...</div>
+                {/* 图片裁剪页面 */}
+                <div className={`h-full ${selectedTab === "cropping" ? "block" : "hidden"}`}>
+                  <div className="h-full overflow-y-auto">
+                    <div className="px-6 py-6">
+                      <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
+                        {items.map((item) => (
+                          <CropCard
+                            key={item.id}
+                            url={item.url}
+                            filename={item.filename}
+                            targetWidth={cropWidth}
+                            targetHeight={cropHeight}
+                            onCropChange={(params) => {
+                              console.log(`[${item.filename}] 裁剪参数:`, params);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )

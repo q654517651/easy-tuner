@@ -2,25 +2,26 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Tabs, Tab, addToast, Button } from "@heroui/react";
 import HeaderBar from "../ui/HeaderBar";
 import GroupCard from "../ui/GroupCard";
+import ScrollArea from "../ui/ScrollArea";
 import { HeroInput, HeroSelect, HeroSwitch, HeroTextarea, type SelectOption } from "../ui/HeroFormControls";
 import { getLocaleString } from "../utils/languageDetection";
+import DynamicLabelingConfig from "../components/DynamicLabelingConfig";
+import {
+  buildModelGroups,
+  getGroupedValue,
+  setGroupedValue,
+  getGroupDisplayTitle,
+  isFullWidthField,
+  type ModelPathsSchema,
+  type GroupedModel
+} from "../utils/modelGrouping";
+import { API_BASE_URL, fetchJson, postJson, readinessApi } from "../services/api";
+import RuntimeInstallModal from "../components/RuntimeInstallModal";
+import WorkspaceSelectModal from "../components/WorkspaceSelectModal";
+import { debounce } from "../utils/debounce";
+import { getNestedValue as getNestedValueUtil, setNestedValue as setNestedValueUtil } from "../utils/object";
 
-// 新增类型定义
-interface ModelPathField {
-  key: string;
-  label: string;
-  help: string;
-  setting_path: string;
-}
-
-interface ModelPathGroup {
-  title: string;
-  fields: ModelPathField[];
-}
-
-interface ModelPathsSchema {
-  [modelType: string]: ModelPathGroup;
-}
+// Types are now imported from modelGrouping.ts
 
 // ============================
 // 类型定义
@@ -147,6 +148,9 @@ export default function SettingsPage() {
   const [modelPathsSchema, setModelPathsSchema] = useState<ModelPathsSchema | null>(null);
   const [fixingEnvironment, setFixingEnvironment] = useState(false);
   const [fixingTrainer, setFixingTrainer] = useState(false);
+  const [showRuntimeModal, setShowRuntimeModal] = useState(false);
+  const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
+  const [workspacePath, setWorkspacePath] = useState<string>("");
 
   // 防抖保存函数
   const debouncedSave = useCallback(
@@ -154,7 +158,7 @@ export default function SettingsPage() {
       try {
         setSaving(true);
 
-        const response = await fetch("/api/v1/settings", {
+        const response = await fetch(`${API_BASE_URL}/settings`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -187,12 +191,7 @@ export default function SettingsPage() {
     try {
       setLoading(true);
 
-      const response = await fetch("/api/v1/settings");
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
+      const result = await fetchJson<any>("/settings");
       if (result.success) {
         setSettings(result.data);
       } else {
@@ -213,18 +212,10 @@ export default function SettingsPage() {
   // 切换到指定版本
   const switchToVersion = async (release: MusubiRelease) => {
     try {
-      const response = await fetch("/api/v1/settings/musubi/switch-version", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          version: release.version,
-          commit_hash: release.commit_hash,
-        }),
+      const result = await postJson<any>("/settings/musubi/switch-version", {
+        version: release.version,
+        commit_hash: release.commit_hash,
       });
-
-      const result = await response.json();
       if (result.success) {
         addToast({
           title: "切换成功",
@@ -252,8 +243,7 @@ export default function SettingsPage() {
   const loadMusubiReleases = async (forceRefresh: boolean = false) => {
     try {
       setReleasesLoading(true);
-      const response = await fetch(`/api/v1/settings/musubi/releases?limit=10&force_refresh=${forceRefresh}`);
-      const result = await response.json();
+      const result = await fetchJson<any>(`/settings/musubi/releases?limit=10&force_refresh=${Boolean(forceRefresh)}`);
 
       if (result.success) {
         setReleases(result.data || []);
@@ -293,17 +283,7 @@ export default function SettingsPage() {
       // 获取当前应用语言对应的locale
       const locale = getLocaleString();
 
-      const response = await fetch("/api/v1/settings/musubi/fix-environment", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          locale: locale
-        }),
-      });
-
-      const result = await response.json();
+      const result = await postJson<any>("/settings/musubi/fix-environment", { locale });
       if (result.success) {
         addToast({
           title: "修复成功",
@@ -339,14 +319,7 @@ export default function SettingsPage() {
         timeout: 3000
       });
 
-      const response = await fetch("/api/v1/settings/musubi/fix-installation", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
-      const result = await response.json();
+      const result = await postJson<any>("/settings/musubi/fix-installation");
       if (result.success) {
         addToast({
           title: "修复成功",
@@ -373,24 +346,13 @@ export default function SettingsPage() {
   };
 
 
-  // 工具函数：获取嵌套值
+  // 使用统一的工具函数（从 utils/object.ts 导入）
   const getNestedValue = (obj: any, path: string): string => {
-    return path.split('.').reduce((o, k) => o?.[k], obj) || "";
+    return getNestedValueUtil(obj, path, "");
   };
 
-  // 工具函数：设置嵌套值
   const setNestedValue = (obj: any, path: string, value: string) => {
-    const keys = path.split('.');
-    const newObj = { ...obj };
-    let current = newObj;
-
-    for (let i = 0; i < keys.length - 1; i++) {
-      if (!current[keys[i]]) current[keys[i]] = {};
-      current = current[keys[i]];
-    }
-    current[keys[keys.length - 1]] = value;
-
-    return newObj;
+    return setNestedValueUtil(obj, path, value);
   };
 
   // 更新嵌套配置并自动保存
@@ -413,11 +375,7 @@ export default function SettingsPage() {
   // 加载模型路径Schema
   const loadModelPathsSchema = async () => {
     try {
-      const response = await fetch("/api/v1/settings/model-paths/schema");
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const result = await response.json();
+      const result = await fetchJson<any>("/settings/model-paths/schema");
       if (result.success) {
         setModelPathsSchema(result.data);
       } else {
@@ -441,6 +399,16 @@ export default function SettingsPage() {
     loadMusubiReleases();
   }, []);
 
+  // 初始化获取当前工作区路径
+  useEffect(() => {
+    (async () => {
+      try {
+        const ws = await readinessApi.getWorkspaceStatus();
+        setWorkspacePath(ws?.data?.path || "");
+      } catch {}
+    })();
+  }, []);
+
   if (loading) {
     return (
       <div className="flex flex-col h-full">
@@ -454,7 +422,7 @@ export default function SettingsPage() {
   if (!settings) return null;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <HeaderBar crumbs={[{ label: "设置" }]} />
 
       <div className="h-[72px] shrink-0 bg-white/40 dark:bg-black/10 backdrop-blur px-4 flex items-center justify-between">
@@ -466,10 +434,11 @@ export default function SettingsPage() {
           <Tab key="后端状态" title="后端状态" />
           <Tab key="模型路径" title="模型路径" />
           <Tab key="打标设置" title="打标设置" />
+          <Tab key="基础设置" title="基础设置" />
         </Tabs>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="px-5 pb-5 space-y-6">
         {/* 保存指示器 - 静默显示 */}
         {saving && (
@@ -493,11 +462,11 @@ export default function SettingsPage() {
                     color="warning"
                     variant="light"
                     size="sm"
-                    onPress={fixEnvironment}
-                    isLoading={fixingEnvironment}
-                    disabled={fixingEnvironment || fixingTrainer}
+                    onPress={() => setShowRuntimeModal(true)}
+                    isLoading={false}
+                    disabled={fixingTrainer}
                   >
-                    {fixingEnvironment ? "修复环境中..." : "修复环境"}
+                    安装/修复训练环境
                   </Button>
                   <Button
                     color="primary"
@@ -515,7 +484,7 @@ export default function SettingsPage() {
               <HeroInput
                 label="Git 仓库地址"
                 value={settings.musubi.git_repository}
-                disabled
+                isDisabled
                 onChange={(value) =>
                   updateSettings({
                     ...settings,
@@ -526,6 +495,7 @@ export default function SettingsPage() {
               <HeroInput
                 label="分支"
                 value={settings.musubi.git_branch}
+                isDisabled
                 onChange={(value) =>
                   updateSettings({
                     ...settings,
@@ -533,19 +503,23 @@ export default function SettingsPage() {
                   })
                 }
               />
-              <div className="md:col-span-2">
-                <HeroInput
-                  label="安装位置"
-                  value={settings.musubi.installation_path}
-                  disabled
-                  onChange={(value) =>
-                    updateSettings({
-                      ...settings,
-                      musubi: { ...settings.musubi, installation_path: String(value) },
-                    })
-                  }
-                />
-              </div>
+              <HeroInput
+                label="安装位置"
+                value={settings.musubi.installation_path}
+                isDisabled
+                onChange={(value) =>
+                  updateSettings({
+                    ...settings,
+                    musubi: { ...settings.musubi, installation_path: String(value) },
+                  })
+                }
+              />
+              <HeroInput
+                label="当前版本"
+                value={settings.musubi.version && settings.musubi.version !== '' ? settings.musubi.version : '未安装'}
+                isDisabled
+                onChange={() => {}}
+              />
             </GroupCard>
 
             <div className="flex-1 min-h-0">
@@ -610,7 +584,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* 模型路径 - 动态生成 */}
+        {/* 模型路径 - 按组分组显示 */}
         {activeTab === "模型路径" && (
           <>
             {!modelPathsSchema ? (
@@ -618,254 +592,155 @@ export default function SettingsPage() {
                 <div className="text-gray-600">加载模型路径配置中...</div>
               </div>
             ) : (
-              Object.entries(modelPathsSchema).map(([modelType, modelGroup]) => (
-                <GroupCard key={modelType} title={modelGroup.title}>
-                  {modelGroup.fields.map((field) => (
-                    <div key={field.key} className={field.key === 'text_encoder_path' || field.key === 'text_encoder1_path' || field.key === 'text_encoder2_path' ? "md:col-span-2" : ""}>
-                      <HeroInput
-                        label={field.label}
-                        value={getNestedValue(settings, field.setting_path)}
-                        onChange={(value) => updateNestedValue(field.setting_path, String(value))}
-                        placeholder={field.help || `请输入${field.label}`}
-                      />
-                    </div>
-                  ))}
-                </GroupCard>
-              ))
-            )}
+              buildModelGroups(modelPathsSchema).map((group) => {
+                // 先渲染共享字段，再渲染所有模型的 dit 字段
+                const sharedFields = group.models[0]?.allFields.filter(f => !isFullWidthField(f.key)) || [];
+                const ditFields = group.models.flatMap(model =>
+                  model.allFields
+                    .filter(f => isFullWidthField(f.key))
+                    .map(field => ({ model, field }))
+                );
 
+                return (
+                  <GroupCard key={group.groupKey} title={getGroupDisplayTitle(group.groupKey)}>
+                    {/* 共享字段小标题 */}
+                    {sharedFields.length > 0 && (
+                      <div className="md:col-span-2">
+                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                          共享组件路径
+                        </h4>
+                      </div>
+                    )}
+
+                    {/* 1. 先显示共享字段（vae, text_encoder 等） */}
+                    {sharedFields.map((field) => (
+                      <div key={field.key}>
+                        <HeroInput
+                          label={field.label}
+                          value={getGroupedValue(
+                            settings,
+                            group.groupKey,
+                            group.models[0].typeName,
+                            field.key,
+                            field.setting_path
+                          )}
+                          onChange={(value) => {
+                            const newSettings = setGroupedValue(
+                              settings,
+                              group.groupKey,
+                              group.models[0].typeName,
+                              field.key,
+                              field.setting_path,
+                              String(value),
+                              group.models
+                            );
+                            updateSettings(newSettings);
+                          }}
+                          placeholder={field.help || `请输入${field.label}`}
+                          help={field.help}
+                        />
+                      </div>
+                    ))}
+
+                    {/* 独占字段小标题 */}
+                    {ditFields.length > 0 && (
+                      <div className="md:col-span-2">
+                        <h4 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2 mt-2">
+                          模型专属路径
+                        </h4>
+                      </div>
+                    )}
+
+                    {/* 2. 再显示所有模型的 dit 字段 */}
+                    {ditFields.map(({ model, field }) => {
+                      const fieldLabel = group.models.length > 1
+                        ? `${model.title} - ${field.label}`
+                        : field.label;
+
+                      return (
+                        <div key={`${model.typeName}-${field.key}`} className="md:col-span-2">
+                          <HeroInput
+                            label={fieldLabel}
+                            value={getGroupedValue(
+                              settings,
+                              group.groupKey,
+                              model.typeName,
+                              field.key,
+                              field.setting_path
+                            )}
+                            onChange={(value) => {
+                              const newSettings = setGroupedValue(
+                                settings,
+                                group.groupKey,
+                                model.typeName,
+                                field.key,
+                                field.setting_path,
+                                String(value),
+                                group.models
+                              );
+                              updateSettings(newSettings);
+                            }}
+                            placeholder={field.help || `请输入${field.label}`}
+                            help={field.help}
+                          />
+                        </div>
+                      );
+                    })}
+                  </GroupCard>
+                );
+              })
+            )}
           </>
         )}
 
         {/* 打标设置 */}
         {activeTab === "打标设置" && (
-          <>
-            <GroupCard title="基本设置">
-              <HeroSelect
-                label="选择打标模型"
-                value={settings.labeling.selected_model}
-                options={[
-                  { label: "LM Studio", value: "lm_studio" },
-                  { label: "OpenAI GPT", value: "gpt" },
-                  { label: "本地 Qwen-VL", value: "local_qwen_vl" },
-                ]}
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: { ...settings.labeling, selected_model: value },
-                  })
-                }
-              />
-              <HeroInput
-                label="调用延迟 (秒)"
-                type="number"
-                min={0}
-                step={0.1}
-                value={settings.labeling.delay_between_calls}
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      delay_between_calls: Number(value) || 0,
-                    },
-                  })
-                }
-              />
-              <div className="md:col-span-2">
-                <HeroTextarea
-                  label="默认打标提示词"
-                  value={settings.labeling.default_prompt}
-                  rows={4}
-                  onChange={(value) =>
-                    updateSettings({
-                      ...settings,
-                      labeling: { ...settings.labeling, default_prompt: String(value) },
-                    })
-                  }
-                />
-              </div>
-              <div className="md:col-span-2">
-                <HeroTextarea
-                  label="翻译提示词"
-                  value={settings.labeling.translation_prompt}
-                  rows={4}
-                  onChange={(value) =>
-                    updateSettings({
-                      ...settings,
-                      labeling: { ...settings.labeling, translation_prompt: String(value) },
-                    })
-                  }
-                />
+          <DynamicLabelingConfig
+            settings={settings}
+            onUpdate={updateSettings}
+          />
+        )}
+        {/* 基础设置 */}
+        {activeTab === "基础设置" && (
+          <div className="h-full flex flex-col space-y-6">
+            <GroupCard title="工作区" noGrid>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm opacity-80 truncate">
+                  当前路径：{workspacePath || '未设置'}
+                </div>
+                <Button size="sm" variant="bordered" onPress={() => setShowWorkspaceModal(true)}>
+                  设置工作区
+                </Button>
               </div>
             </GroupCard>
-
-            {settings.labeling.selected_model === "gpt" && (
-            <GroupCard title="OpenAI GPT 配置">
-              <HeroInput
-                label="API Key"
-                value={settings.labeling.models.gpt.api_key}
-                placeholder="sk-..."
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        gpt: {
-                          ...settings.labeling.models.gpt,
-                          api_key: String(value),
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-              <HeroInput
-                label="API Base URL"
-                value={settings.labeling.models.gpt.base_url}
-                placeholder="https://api.openai.com/v1"
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        gpt: {
-                          ...settings.labeling.models.gpt,
-                          base_url: String(value),
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-              <HeroInput
-                label="模型名称"
-                value={settings.labeling.models.gpt.model_name}
-                placeholder="gpt-4o"
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        gpt: {
-                          ...settings.labeling.models.gpt,
-                          model_name: String(value),
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-              <HeroInput
-                label="最大 Token 数"
-                type="number"
-                min={1}
-                value={settings.labeling.models.gpt.max_tokens}
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        gpt: {
-                          ...settings.labeling.models.gpt,
-                          max_tokens: Number(value) || 1000,
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-              <HeroInput
-                label="Temperature"
-                type="number"
-                min={0}
-                max={2}
-                step={0.1}
-                value={settings.labeling.models.gpt.temperature}
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        gpt: {
-                          ...settings.labeling.models.gpt,
-                          temperature: Number(value) || 0.7,
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-            </GroupCard>
-            )}
-
-            {settings.labeling.selected_model === "lm_studio" && (
-            <GroupCard title="LM Studio 配置">
-              <HeroInput
-                label="API Base URL"
-                value={settings.labeling.models.lm_studio.base_url}
-                placeholder="http://127.0.0.1:1234/v1"
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        lm_studio: {
-                          ...settings.labeling.models.lm_studio,
-                          base_url: String(value),
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-              <HeroInput
-                label="模型名称"
-                value={settings.labeling.models.lm_studio.model_name}
-                placeholder="local-model"
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    labeling: {
-                      ...settings.labeling,
-                      models: {
-                        ...settings.labeling.models,
-                        lm_studio: {
-                          ...settings.labeling.models.lm_studio,
-                          model_name: String(value),
-                        },
-                      },
-                    },
-                  })
-                }
-              />
-            </GroupCard>
-            )}
-          </>
+          </div>
         )}
         </div>
-      </div>
+      </ScrollArea>
+      {/* 安装/修复训练环境弹窗复用 RuntimeInstallModal */}
+      <RuntimeInstallModal
+        isOpen={showRuntimeModal}
+        onClose={() => setShowRuntimeModal(false)}
+        onSuccess={() => {
+          setShowRuntimeModal(false);
+          // 完成后刷新设置状态，显示最新环境信息
+          loadSettings();
+        }}
+      />
+      {/* 工作区选择弹窗 */}
+      <WorkspaceSelectModal
+        isOpen={showWorkspaceModal}
+        onClose={() => setShowWorkspaceModal(false)}
+        onSuccess={async () => {
+          setShowWorkspaceModal(false);
+          try {
+            const ws = await readinessApi.getWorkspaceStatus();
+            setWorkspacePath(ws?.data?.path || "");
+          } catch {}
+        }}
+      />
     </div>
   );
 }
 
-// 防抖函数
-function debounce<T extends (...args: any[]) => any>(func: T, delay: number): T {
-  let timeoutId: NodeJS.Timeout;
-  return ((...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), delay);
-  }) as T;
-}
+// debounce 函数已从 utils/debounce.ts 导入

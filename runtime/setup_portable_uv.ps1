@@ -1,196 +1,193 @@
-﻿# install-embed-uv-final.ps1
-# Fully portable embedded Python + uv installer (Windows)
-# - Installs Python embeddable locally
-# - Patches python311._pth to enable site-packages
-# - Bootstraps pip only to install uv into embedded env
-# - Then uses embedded uv (Scripts\uv.exe) for all package installs
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+  setup_portable_uv.ps1（整合稳健版）
+#>
 
+# ---- 参数必须在最前面（仅可在注释/#requires之后）----
 param(
-    [switch]$UseChinaMirror,  # 是否使用国内镜像源
-    [switch]$Help             # 显示帮助信息
+  # 运行时根目录（默认脚本上级目录）
+  [string]$RuntimeDir = (Resolve-Path -LiteralPath $PSScriptRoot).Path,
+  # 使用国内镜像（带默认值，避免 StrictMode 下未绑定时报错）
+  [switch]$UseChinaMirror = $false
 )
 
-if ($Help) {
-    Write-Host "用法: setup_portable_uv.ps1 [-UseChinaMirror] [-Help]"
-    Write-Host ""
-    Write-Host "参数说明:"
-    Write-Host "  -UseChinaMirror  : 使用国内镜像源 (清华大学源)"
-    Write-Host "  -Help            : 显示此帮助信息"
-    Write-Host ""
-    Write-Host "示例:"
-    Write-Host "  .\setup_portable_uv.ps1                # 使用默认国际源"
-    Write-Host "  .\setup_portable_uv.ps1 -UseChinaMirror # 使用国内源"
-    exit 0
+# ---- 严格与失败即停 ----
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+# ---- TLS/编码预处理 ----
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+try {
+  [Console]::InputEncoding  = New-Object System.Text.UTF8Encoding($false)
+  [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+} catch {}
+
+# ---- PS7 开启 ANSI；PS5 静默降级 ----
+$IsPS7 = $PSVersionTable.PSVersion.Major -ge 7
+if ($IsPS7) { try { $PSStyle.OutputRendering = 'Ansi' } catch {} }
+
+function _Color($text, $ansi) { if ($IsPS7) { return "$ansi$text`e[0m" } else { return $text } }
+$C_INFO    = { param($t) _Color $t "`e[36;1m" }
+$C_WARN    = { param($t) _Color $t "`e[33;1m" }
+$C_ERROR   = { param($t) _Color $t "`e[31;1m" }
+$C_SUCCESS = { param($t) _Color $t "`e[32;1m" }
+$C_DIM     = { param($t) _Color $t "`e[90m"   }
+
+function Timestamp { (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }
+function Info    { param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Message)  Write-Host "$((Timestamp))  $(& $C_INFO 'INFO')     $($Message -join ' ')" }
+function Warn    { param([string]$Message)                                                 Write-Host "$((Timestamp))  $(& $C_WARN 'WARN')     $Message" }
+function Write-LogError { param([string]$Message)                                          Write-Host "$((Timestamp))  $(& $C_ERROR 'ERROR')    $Message" }
+function Success { param([string]$Message)                                                 Write-Host "$((Timestamp))  $(& $C_SUCCESS 'OK')       $Message" }
+
+# ---- 小工具 ----
+function Invoke-WebRequestRetry {
+  param([string]$Uri,[string]$OutFile,[int]$Retries=3,[int]$DelaySec=2,[int]$TimeoutSec=180)
+  for ($i=1; $i -le $Retries; $i++) {
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -TimeoutSec $TimeoutSec
+      if (Test-Path $OutFile -PathType Leaf) { return }
+    } catch {
+      if ($i -eq $Retries) { throw }
+      Start-Sleep -Seconds $DelaySec
+    }
+  }
 }
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+function New-DirectoryIfMissing {
+  param([Parameter(Mandatory=$true)][string]$Path)
+  if (-not (Test-Path $Path)) {
+    New-Item -ItemType Directory -Force -Path $Path | Out-Null
+  }
+}
 
-# =================== Config ===================
+# ---- 常量/路径 ----
 $PythonVersion = "3.11.9"
 $EmbedZipUrl   = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
-$GetPipUrl     = "https://bootstrap.pypa.io/get-pip.py"
+$UvZipUrl      = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
 
-# 目标安装路径选择策略：
-# 1) 如果已存在 runtime\python\python.exe -> 用 runtime\python
-# 2) 否则若存在 runtime 目录 -> 也安装到 runtime\python
-# 3) 否则使用 .\python
-$RuntimeDirCand = Join-Path (Get-Location) "runtime"
-$PyDir =
-    if (Test-Path (Join-Path $RuntimeDirCand "python\python.exe")) { Join-Path $RuntimeDirCand "python" }
-    elseif (Test-Path $RuntimeDirCand)                              { Join-Path $RuntimeDirCand "python" }
-    else                                                            { Join-Path (Get-Location) "python" }
-
-$PyExe      = Join-Path $PyDir "python.exe"
-$PthFile    = Join-Path $PyDir  "python311._pth"
-$ScriptsDir = Join-Path $PyDir  "Scripts"
-$EmbedZip   = Join-Path (Get-Location) "python-embed.zip"
-$GetPipPath = Join-Path (Get-Location) "get-pip.py"
+$BaseDir    = (Resolve-Path $RuntimeDir).Path
+$PyDir      = Join-Path $BaseDir "python"
+$ScriptsDir = Join-Path $PyDir   "Scripts"
+$PyExe      = Join-Path $PyDir   "python.exe"
+$PthFile    = Join-Path $PyDir   "python311._pth"
 $UvExe      = Join-Path $ScriptsDir "uv.exe"
 
-# requirements 文件优先级
-$ReqFiles = @("requirements-uv-windows-new.txt", "requirements-uv-windows.txt")
+$TmpDir     = Join-Path $env:TEMP "easy-tuner-installer"
+New-DirectoryIfMissing $TmpDir
+$EmbedZip   = Join-Path $TmpDir "python-embed.zip"
+$UvZip      = Join-Path $TmpDir "uv-windows.zip"
 
-# =================== Environment ===================
-$Env:HF_HOME = "huggingface"
+# ---- 环境变量（当前会话）----
 $Env:PIP_DISABLE_PIP_VERSION_CHECK = 1
 $Env:PIP_NO_CACHE_DIR = 1
-
-# 根据参数决定是否使用国内镜像源
-if ($UseChinaMirror) {
-    Info "使用国内镜像源 (清华大学源)"
-    $Env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple/"
-} else {
-    Info "使用默认国际源"
-    # 不设置 PIP_INDEX_URL，使用默认的 pypi.org
-}
-
-# PyTorch CUDA 轮子额外源（保留）
-$Env:PIP_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-
-# uv 行为（即便 uv 在嵌入式中，这些 env 仍然适用）
-$Env:UV_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
-$Env:UV_CACHE_DIR = "${env:LOCALAPPDATA}/uv/cache"
 $Env:UV_NO_BUILD_ISOLATION = 1
 $Env:UV_NO_CACHE = 0
-$Env:UV_LINK_MODE = "symlink"
-
-$Env:GIT_LFS_SKIP_SMUDGE = 1
-$Env:CUDA_HOME = "${env:CUDA_PATH}"
 $Env:HF_HUB_ENABLE_HF_TRANSFER = 0
 
-# =================== Helpers ===================
-function Info($m){ Write-Host "▶ $m" }
-function Ok($m){ Write-Host "✅ $m" }
-function Fail($m){ Write-Host "❌ $m"; exit 1 }
+# ---- UV 缓存与链接模式（强烈建议）----
+$Env:UV_CACHE_DIR = Join-Path $RuntimeDir "cache\uv"
+$Env:UV_LINK_MODE = "copy"
+New-DirectoryIfMissing $Env:UV_CACHE_DIR
 
-function Invoke-WebRequestRetry {
-    param([string]$Uri,[string]$OutFile,[int]$Retries=3,[int]$DelaySec=2)
-    for ($i=1; $i -le $Retries; $i++) {
-        try {
-            Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -TimeoutSec 180
-            if (Test-Path $OutFile -PathType Leaf) { return }
-        } catch {
-            if ($i -eq $Retries) { throw }
-            Start-Sleep -Seconds $DelaySec
-        }
-    }
-}
 
-function Ensure-Dir($p){ if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null } }
-
-# =================== 1) Ensure embedded Python ===================
-if (-not (Test-Path $PyExe)) {
-    Info "Downloading Python $PythonVersion embeddable to $PyDir ..."
-    Invoke-WebRequestRetry -Uri $EmbedZipUrl -OutFile $EmbedZip
-    Ensure-Dir $PyDir
-    Expand-Archive -Path $EmbedZip -DestinationPath $PyDir -Force
-    Remove-Item $EmbedZip -Force
-    Ok "Embedded Python extracted: $PyExe"
+if ($UseChinaMirror) {
+  Info "使用国内镜像（清华 TUNA）"
+  $Env:PIP_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+  $Env:UV_INDEX_URL  = $Env:PIP_INDEX_URL
 } else {
-    Info "Embedded Python found: $PyExe"
+  Info "使用默认国际源"
+  Remove-Item Env:\PIP_INDEX_URL -ErrorAction SilentlyContinue | Out-Null
+  Remove-Item Env:\UV_INDEX_URL  -ErrorAction SilentlyContinue | Out-Null
 }
 
-# =================== 2) Patch python311._pth ===================
-if (-not (Test-Path $PthFile)) {
+# 可选：PyTorch CUDA 额外源
+$Env:PIP_EXTRA_INDEX_URL = "https://download.pytorch.org/whl/cu128"
+$Env:UV_EXTRA_INDEX_URL  = $Env:PIP_EXTRA_INDEX_URL
+
+Info "脚本编码: UTF-8，PowerShell: $($PSVersionTable.PSVersion)"
+Info "RuntimeDir: $BaseDir"
+
+try {
+  # 1) 准备目录
+  New-DirectoryIfMissing $BaseDir
+  New-DirectoryIfMissing $PyDir
+  New-DirectoryIfMissing $ScriptsDir
+
+  # 2) 获取/解压嵌入式 Python
+  if (-not (Test-Path $PyExe)) {
+    Info "下载嵌入式 Python $PythonVersion ..."
+    Invoke-WebRequestRetry -Uri $EmbedZipUrl -OutFile $EmbedZip
+    Info "解压到 $PyDir ..."
+    Expand-Archive -Path $EmbedZip -DestinationPath $PyDir -Force
+  } else {
+    Info "发现已存在的嵌入式 Python: $PyExe"
+  }
+
+  # 3) 补丁 python311._pth 以启用 site-packages
+  if (-not (Test-Path $PthFile)) {
 @"
 python311.zip
 .
 Lib\site-packages
 import site
 "@ | Set-Content -Path $PthFile -Encoding UTF8
-    Ok "Created python311._pth (site-packages enabled)"
-} else {
+    Success "已创建 python311._pth（启用 site-packages）"
+  } else {
     $pth = Get-Content $PthFile -Raw
     $changed = $false
     if ($pth -notmatch "(?m)^\.$")                 { Add-Content -Path $PthFile -Value "."; $changed=$true }
     if ($pth -notmatch "(?m)^Lib\\site-packages$") { Add-Content -Path $PthFile -Value "Lib\site-packages"; $changed=$true }
     if ($pth -notmatch "(?m)^import site$")        { Add-Content -Path $PthFile -Value "import site"; $changed=$true }
-    if ($changed) { Ok "Patched python311._pth" } else { Info "python311._pth already OK" }
-}
+    if ($changed) { Success "已修补 python311._pth" } else { Info "python311._pth 已正确" }
+  }
 
-# 确保 Scripts 目录存在 + 将本会话 PATH 指向嵌入式
-Ensure-Dir $ScriptsDir
-$Env:Path = "$ScriptsDir;$PyDir;$Env:Path"
-# 告诉 uv 一律用嵌入式 Python
-$Env:UV_PYTHON = $PyExe
+  # 4) 调整 PATH（仅当前会话）与 UV 绑定的 Python
+  $Env:Path = "$ScriptsDir;$PyDir;$Env:Path"
+  $Env:UV_PYTHON = $PyExe
 
-# =================== 3) Ensure embedded uv (no pip needed) ===================
-# 直接把 uv 的 Windows 二进制放到嵌入式 Scripts 目录，完全不依赖 pip
-
-Ensure-Dir $ScriptsDir  # 已有同名函数
-
-# 预期 uv 可执行路径
-$UvExe = Join-Path $ScriptsDir "uv.exe"
-
-if (-not (Test-Path $UvExe)) {
-    $UvZipUrl = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip"
-    $UvZip    = Join-Path $env:TEMP "uv-windows.zip"
-
-    Info "Downloading uv binary to embedded Scripts ..."
+  # 5) 下载 uv 二进制至嵌入式 Scripts
+  if (-not (Test-Path $UvExe)) {
+    Info "下载 uv 二进制 ..."
     Invoke-WebRequestRetry -Uri $UvZipUrl -OutFile $UvZip
-    Expand-Archive -Force -Path $UvZip -DestinationPath $ScriptsDir
-    Remove-Item $UvZip -Force
+    Expand-Archive -Path $UvZip -DestinationPath $ScriptsDir -Force
+
+    if (-not (Test-Path $UvExe)) {
+      $UvAlt = Join-Path $ScriptsDir "uv"
+      if (Test-Path $UvAlt) { Rename-Item -Path $UvAlt -NewName "uv.exe" -Force }
+    }
+  }
+  & $UvExe --version | Out-Null
+  Success "uv 就绪: $UvExe"
+
+  # 7) 安装流程（使用魔改的 pyproject.toml + requirements-uv-windows.txt）
+  $ReqFile = Join-Path $RuntimeDir "requirements-uv-windows.txt"
+
+  if (-not (Test-Path $ReqFile -PathType Leaf)) {
+    throw "未找到 $ReqFile（请确保 runtime/requirements-uv-windows.txt 存在）"
+  }
+
+  Info "使用 requirements 文件：$ReqFile"
+
+  # 7.1 直接使用 uv pip install（-e . 会先安装魔改的 pyproject.toml，然后 requirements 覆盖具体版本）
+  Push-Location $RuntimeDir
+  Info "安装依赖（基于魔改的 pyproject.toml + requirements-uv-windows.txt）..."
+  & $UvExe pip install --python "$PyExe" --link-mode=copy --index-strategy unsafe-best-match -r "requirements-uv-windows.txt"
+  $code = $LASTEXITCODE
+  Pop-Location
+
+  if ($code -ne 0) { throw "uv pip install 失败 (exit=$code)" }
+
+
+  # 8) 版本确认
+  & $PyExe --version
+  Success "🎉 完成：嵌入式 Python 目录 $PyDir（使用 cu128；以 overrides/req 为准；不重复下载）"
+
+
+  exit 0
 }
-
-# 某些环境可能解压出 uv.exe/uv（无扩展名），做一次兜底
-if (-not (Test-Path $UvExe)) {
-    $UvAlt = Join-Path $ScriptsDir "uv"
-    if (Test-Path $UvAlt) { $UvExe = $UvAlt }
+catch {
+  Write-LogError "安装脚本执行失败：$($_.Exception.Message)"
+  if ($_.ScriptStackTrace) { Write-Host $(& $C_DIM "Stack: $($_.ScriptStackTrace)") }
+  exit 1
 }
-
-# 校验 uv 是否可用
-& $UvExe --version | Out-Null
-Ok "uv ready: $UvExe"
-
-
-# =================== 5) Use embedded uv to install packages ===================
-Info "Installing base packages via embedded uv ..."
-& $UvExe pip install --python "$PyExe" -U hatchling editables torch==2.8.0
-if ($LASTEXITCODE -ne 0) { Fail "uv install base packages failed" }
-
-# 依次尝试 requirements 文件
-$ReqUsed = $null
-foreach ($rf in $ReqFiles) {
-    if (Test-Path (Join-Path (Get-Location) $rf)) { $ReqUsed = $rf; break }
-}
-if ($ReqUsed) {
-    Info "Syncing requirements via embedded uv: $ReqUsed"
-    & $UvExe pip install --python "$PyExe" --upgrade --link-mode=copy --index-strategy unsafe-best-match -r $ReqUsed
-    if ($LASTEXITCODE -ne 0) { Fail "uv install $ReqUsed failed" }
-} else {
-    Info "No requirements file found (looked for: $($ReqFiles -join ', ')). Skip."
-}
-
-# =================== 6) Show versions & done ===================
-& $PyExe --version
-# （无需验证 pip）
-Ok "🎉 Done. All packages installed into embedded env: $PyDir"
-
-Write-Host ""
-Write-Host "👉 运行示例："
-Write-Host "   `"$($PyExe)`" -m your_module"
-Write-Host "   `"$($PyExe)`" your_script.py"
-Write-Host "（后续安装/同步依赖请使用嵌入式 uv：`"$($UvExe)`" ...）"
-try { $null = Read-Host "完成。按 Enter 关闭窗口..." } catch {}

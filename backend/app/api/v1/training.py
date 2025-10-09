@@ -2,7 +2,7 @@
 训练管理API路由
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Path, Body, Request
+from fastapi import APIRouter, HTTPException, Depends, Path, Body, Request, Response
 from typing import List
 import logging
 
@@ -138,6 +138,19 @@ async def start_training_task(
 ):
     """开始训练任务"""
     try:
+        # 检查 Python 运行时是否存在
+        from ...core.environment import get_paths
+        paths = get_paths()
+        if not paths.runtime_python_exists:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "HTTPError",
+                    "error_code": "PYTHON_MISSING",
+                    "message": "缺少 Python 运行时，请先安装运行时环境"
+                }
+            )
+
         success, message = await service.start_task(task_id)
         if success:
             return BaseResponse(message=f"开始训练任务成功: {message}")
@@ -170,7 +183,7 @@ async def stop_training_task(
         logger.exception("停止训练任务失败")
         raise HTTPException(status_code=500, detail=f"停止训练任务失败: {str(e)}")
 
-@router.delete("/training/tasks/{task_id}", response_model=BaseResponse)
+@router.delete("/training/tasks/{task_id}", status_code=204)
 async def delete_training_task(
     task_id: str = Path(..., description="训练任务ID"),
     service: TrainingService = Depends(get_training_service)
@@ -179,7 +192,7 @@ async def delete_training_task(
     try:
         success, message = await service.delete_task(task_id)
         if success:
-            return BaseResponse(message=f"删除训练任务成功: {message}")
+            return Response(status_code=204)
         else:
             raise HTTPException(status_code=400, detail=message)
     except HTTPException:

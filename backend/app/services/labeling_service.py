@@ -15,24 +15,27 @@ from ..models.labeling import (
     LabelingModelType, LabelingTaskStatus, BatchLabelingRequest,
     LabelingProgress, LabelingResult, AvailableModel
 )
-from ..core.labeling.service import get_labeling_service
-from ..core.labeling.ai_client import ModelType
+from ..core.labeling.providers.registry import get_provider, has_provider
 from ..services.dataset_service import get_dataset_service
 from ..core.exceptions import APIException, ValidationError
+from ..core.config import get_config
 from ..utils.logger import log_info, log_error, log_success
+import os
+import time
 
 
 class LabelingServiceAPI:
-    """打标服务API层 - 使用真实的LabelingService"""
-    
+    """打标服务API层 - 直接使用 Provider 架构"""
+
     def __init__(self):
-        self._labeling_service = get_labeling_service()
+        self._config = get_config()
         self._dataset_service = get_dataset_service()
         self.tasks: Dict[str, LabelingProgress] = {}
         self.results: Dict[str, LabelingResult] = {}
         self._lock = threading.Lock()
         
-        # 可用模型配置（基于真实的AI客户端配置）
+        # ⚠️ 注意：此模型列表前端未使用，仅用于 /labeling/models API 兼容性
+        # 前端实际使用 settings API 获取 Provider 元数据
         self.available_models = [
             AvailableModel(
                 id="gpt-4-vision-preview",
@@ -42,7 +45,7 @@ class LabelingServiceAPI:
                 supports_batch=True,
                 max_batch_size=5,
                 estimated_speed_per_image=3.0,
-                is_available=self._check_model_availability(ModelType.GPT)
+                is_available=False  # 初始化时设为 False，由 get_available_models() 动态更新
             ),
             AvailableModel(
                 id="lm-studio-local",
@@ -52,7 +55,7 @@ class LabelingServiceAPI:
                 supports_batch=True,
                 max_batch_size=10,
                 estimated_speed_per_image=1.5,
-                is_available=self._check_model_availability(ModelType.LM_STUDIO)
+                is_available=False  # 初始化时设为 False，由 get_available_models() 动态更新
             ),
             AvailableModel(
                 id="qwen-vl-chat",
@@ -62,14 +65,22 @@ class LabelingServiceAPI:
                 supports_batch=True,
                 max_batch_size=8,
                 estimated_speed_per_image=2.0,
-                is_available=self._check_model_availability(ModelType.LOCAL_QWEN_VL)
+                is_available=False  # 初始化时设为 False，由 get_available_models() 动态更新
             )
         ]
     
-    def _check_model_availability(self, model_type: ModelType) -> bool:
-        """检查模型是否可用"""
+    async def _check_model_availability(self, provider_name: str) -> bool:
+        """
+        检查模型是否可用（使用 Provider 注册表）
+
+        ⚠️ 注意：此方法目前前端未调用，仅用于后端 API 兼容性保留
+        前端当前使用的是配置文件中的 selected_model，不依赖此检查
+        """
         try:
-            return self._labeling_service.test_ai_connection(model_type.value)
+            provider = get_provider(provider_name)
+            if provider is None:
+                return False
+            return await provider.test_connection()
         except Exception:
             return False
     
@@ -83,12 +94,17 @@ class LabelingServiceAPI:
         return type_mapping.get(api_model_type, "lm_studio")
     
     async def get_available_models(self) -> List[AvailableModel]:
-        """获取可用的打标模型"""
-        # 实时更新模型可用性
+        """
+        获取可用的打标模型
+
+        ⚠️ 注意：此 API 前端未调用，仅保留用于后端兼容性
+        前端实际使用 GET /api/v1/settings 获取 Provider 元数据
+        """
+        # 实时更新模型可用性（通过 Provider 注册表检查）
         for model in self.available_models:
             core_type = self._convert_model_type(model.type)
-            model.is_available = self._check_model_availability(ModelType(core_type))
-        
+            model.is_available = await self._check_model_availability(core_type)
+
         return self.available_models
     
     async def start_batch_labeling(self, request: BatchLabelingRequest) -> str:
@@ -176,7 +192,7 @@ class LabelingServiceAPI:
             
             # 准备打标参数
             core_model_type = self._convert_model_type(request.model_type)
-            prompt = request.prompt or self._labeling_service.get_default_prompt()
+            prompt = request.prompt or self._config.labeling.default_prompt
             
             # 批量处理图片
             image_paths = []
@@ -207,14 +223,85 @@ class LabelingServiceAPI:
             
             # 调用真实的打标服务
             try:
-                success_count, message = self._labeling_service.label_images(
-                    images=image_paths,
-                    labels=labels,
-                    prompt=prompt,
-                    model_type=core_model_type,
-                    delay=request.delay_between_requests or 1.0,
-                    progress_callback=progress_callback
-                )
+                # 若选择本地 Qwen‑VL，则走本地 Provider 执行一批
+                # Provider only: sequential per-image via registry (no ai_client)
+                key = (core_model_type or '').lower().strip().replace('-', '_').replace(' ', '_')
+                provider = get_provider(key)
+                if provider is None:
+                    raise ValidationError(f"model not available: {core_model_type}")
+
+                total_count = len(image_paths)
+                delay_val = request.delay_between_requests or 1.0
+
+                for i, img_path in enumerate(image_paths):
+                    if task.status == LabelingTaskStatus.CANCELLED:
+                        break
+                    if progress_callback:
+                        progress_callback(i, total_count, f"processing: {img_path}")
+
+                    r = await provider.generate_label(img_path, prompt=prompt)
+
+                    if r and getattr(r, 'ok', False) and getattr(r, 'text', None):
+                        labels[img_path] = r.text or ''
+                    else:
+                        log_error(f"label failed: {img_path}")
+
+                    if i < total_count - 1 and delay_val > 0:
+                        time.sleep(delay_val)
+
+                success_count = sum(1 for v in labels.values() if v)
+                message = f"labeled {success_count}/{total_count} images"
+
+                # legacy branch disabled to keep for reference
+                if False and core_model_type == 'local_qwen_vl':
+                    provider = QwenVLProvider()
+                    weights_path = os.getenv('QWEN_VL_WEIGHTS')
+
+                    def _run_provider_batch():
+                        loop = asyncio.new_event_loop()
+                        try:
+                            asyncio.set_event_loop(loop)
+                            return loop.run_until_complete(
+                                provider.generate_labels(image_paths, prompt=prompt, weights_path=weights_path)
+                            )
+                        finally:
+                            try:
+                                loop.close()
+                            except Exception:
+                                pass
+
+                    out: Dict[str, Any] = {}
+                    t = threading.Thread(target=lambda: out.setdefault('res', _run_provider_batch()), daemon=True)
+                    t.start(); t.join()
+                    results_batch = out.get('res') or []
+
+                    for i, (img_path, r) in enumerate(zip(image_paths, results_batch)):
+                        if task.status == LabelingTaskStatus.CANCELLED:
+                            break
+                        if progress_callback:
+                            progress_callback(i, total_count, f"处理: {img_path}")
+                        if r and getattr(r, 'ok', False) and getattr(r, 'text', None):
+                            caption = r.text or ""
+                            labels[img_path] = caption
+                            # 写入标签文件
+                            try:
+                                self._labeling_service._save_label_to_file(img_path, caption)
+                            except Exception:
+                                pass
+                        else:
+                            log_error(f"生成失败: {img_path}")
+
+                    success_count = len(labels)
+                    message = f"成功标注 {success_count}/{total_count} 张图片"
+                elif False:
+                    success_count, message = self._labeling_service.label_images(
+                        images=image_paths,
+                        labels=labels,
+                        prompt=prompt,
+                        model_type=core_model_type,
+                        delay=request.delay_between_requests or 1.0,
+                        progress_callback=progress_callback
+                    )
                 
                 # 构建结果
                 for i, img in enumerate(images):
@@ -307,18 +394,32 @@ class LabelingServiceAPI:
 
         # 使用核心打标服务（按当前选中模型 & 默认 prompt）
         try:
-            caption = self._labeling_service.label_single_image(
-                image_path=image_path,
-                prompt=prompt or None,
-                model_type=None
-            )
+            core_model_type = (self._config.labeling.selected_model or "").lower().strip().replace('-', '_').replace(' ', '_')
+            from ..core.labeling.providers.registry import get_provider
+            provider = get_provider(core_model_type)
+            if provider is None:
+                raise ValidationError(f"model not available: {core_model_type}")
 
-            if caption and not caption.startswith("错误") and not caption.startswith("AI调用失败"):
-                # 写入数据集标签
-                self._dataset_service.update_label(dataset_id, filename, caption)
-                return {"filename": filename, "caption": caption, "success": True}
-            else:
-                return {"filename": filename, "success": False, "error": caption or "打标失败"}
+            r = await provider.generate_label(image_path, prompt=prompt or None)
+
+            # 检查打标结果
+            if not r or not r.ok:
+                # 打标失败，构建详细错误信息
+                error_msg = "打标失败"
+                if r:
+                    if r.detail:
+                        error_msg = f"打标失败: {r.detail}"
+                    elif r.error_code:
+                        error_msg = f"打标失败 ({r.error_code})"
+                return {"filename": filename, "success": False, "error": error_msg}
+
+            caption = r.text or ""
+            if not caption or caption.startswith("错误") or caption.startswith("AI调用失败"):
+                return {"filename": filename, "success": False, "error": caption or "打标失败：返回结果为空"}
+
+            # 打标成功，写入数据集标签
+            self._dataset_service.update_label(dataset_id, filename, caption)
+            return {"filename": filename, "caption": caption, "success": True}
         except Exception as e:
             log_error(f"单张打标失败: {dataset_id}/{filename}: {str(e)}")
             raise APIException(500, f"单张打标失败: {str(e)}")
@@ -330,9 +431,19 @@ class LabelingServiceAPI:
             raise ValidationError(f"模型未找到: {model_id}")
         
         core_model_type = self._convert_model_type(model.type)
-        
+
         try:
-            is_connected = self._labeling_service.test_ai_connection(core_model_type)
+            # 使用 Provider 注册表测试连接
+            provider = get_provider(core_model_type)
+            if provider is None:
+                return {
+                    "model_id": model_id,
+                    "is_connected": False,
+                    "status": f"模型未注册: {core_model_type}",
+                    "tested_at": datetime.now().isoformat()
+                }
+
+            is_connected = await provider.test_connection()
             return {
                 "model_id": model_id,
                 "is_connected": is_connected,

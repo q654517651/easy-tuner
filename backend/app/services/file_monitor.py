@@ -14,7 +14,8 @@ try:
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
-    print("警告: watchdog 库未安装，文件监控功能将被禁用")
+    from ..utils.logger import log_warning
+    log_warning("watchdog 库未安装，文件监控功能将被禁用")
 
 from ..utils.logger import log_info, log_error
 

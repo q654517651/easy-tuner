@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Button } from "@heroui/react";
 import { useTheme } from "../contexts/ThemeContext";
 import { useI18n } from "../i18n/I18nProvider";
+import { useIsElectron } from "../utils/platform";
 // import sidebar_icon_home from "@/assets/icon/sidebar_icon_home.svg?react";
 import DatasetIcon from "@/assets/icon/sidebar_icon_dataset.svg?react";
 import CreateIcon  from "@/assets/icon/sidebar_icon_create.svg?react";
@@ -27,16 +28,11 @@ const Item = ({ to, label, icon }: { to: string; label: string; icon: React.Reac
   >
     <span
         className={[
-        "flex items-center justify-center w-6 h-6",   // 外框 24×24
-        // 1) 图标颜色 = 文本色（会随浅/深色变）
-        "text-gray-900 dark:text-gray-100",        // 或用你项目的 text-foreground
-        // 2) 传进来的 <svg> 统一大小
+        "flex items-center justify-center w-6 h-6",
+        "text-gray-900 dark:text-gray-100",
         "[&>svg]:w-5 [&>svg]:h-5",
-        // 3) 只改描边：让所有子节点 stroke 跟随 currentColor；禁用填充
-        "[&_*]:stroke-current",
-        "[&_*]:fill-none",
-        // 4) 描边粗细在这里统一控制（1 或 2；要 1.5 可用 [&_*]:stroke-[1.5]）
-        "[&_*]:stroke-2",
+        "[&_*]:fill-current",
+        "[&_*]:stroke-none",
     ].join(" ")}
     >
         {icon}
@@ -66,9 +62,8 @@ const FunctionItem = ({ label, icon, onClick, dropdown }: {
           "flex items-center justify-center w-6 h-6",
           "text-gray-900 dark:text-gray-100",
           "[&>svg]:w-5 [&>svg]:h-5",
-          "[&_*]:stroke-current",
-          "[&_*]:fill-none",
-          "[&_*]:stroke-2",
+          "[&_*]:fill-current",
+          "[&_*]:stroke-none",
         ].join(" ")}
       >
         {icon}
@@ -81,6 +76,7 @@ const FunctionItem = ({ label, icon, onClick, dropdown }: {
 export default function Sidebar() {
     const { isDark, toggleTheme } = useTheme();
     const { lang, setLang, t } = useI18n();
+    const isElectron = useIsElectron();
 
     const languages = [
         { key: "zh", label: "中文", flag: "🇨🇳" },
@@ -91,7 +87,7 @@ export default function Sidebar() {
 
     return (
         <div className="h-full flex flex-col">
-            <div className="px-4 pt-4 pb-3 flex items-center gap-2">
+            <div className={`px-6 pb-3 flex items-center gap-2 ${isElectron ? '' : 'pt-4'}`}>
                 <div className="w-8 h-8 flex items-center justify-center">
                     <Logo className="w-8 h-8" />
                 </div>
@@ -99,10 +95,10 @@ export default function Sidebar() {
       </div>
 
         <nav className="mt-2">
-            <Item to="/datasets" label={t("[nav]数据集")} icon={<DatasetIcon className="text-foreground stroke-2"/>}/>
-            <Item to="/train/create" label={t("[nav]创建任务")} icon={<CreateIcon className="text-foreground stroke-2"/>}/>
-            <Item to="/tasks" label={t("[nav]任务列表")} icon={<TaskIcon className="text-foreground stroke-2"/>}/>
-            <Item to="/settings" label={t("[nav]设置")} icon={<SettingIcon className="text-foreground stroke-2"/>}/>
+            <Item to="/datasets" label={t("[nav]数据集")} icon={<DatasetIcon />}/>
+            <Item to="/train/create" label={t("[nav]创建任务")} icon={<CreateIcon />}/>
+            <Item to="/tasks" label={t("[nav]任务列表")} icon={<TaskIcon />}/>
+            <Item to="/settings" label={t("[nav]设置")} icon={<SettingIcon />}/>
         </nav>
 
         {/* 功能按钮区域 */}
@@ -115,7 +111,7 @@ export default function Sidebar() {
               <Dropdown>
                 <DropdownTrigger>
                   <button className="flex items-center gap-2 p-3 rounded-[16px] mx-3 my-1 text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/5 w-[calc(100%-24px)]">
-                    <span className="flex items-center justify-center w-6 h-6 text-gray-900 dark:text-gray-100 [&>svg]:w-5 [&>svg]:h-5 [&_*]:stroke-current [&_*]:fill-none [&_*]:stroke-2">
+                    <span className="flex items-center justify-center w-6 h-6 text-gray-900 dark:text-gray-100 [&>svg]:w-5 [&>svg]:h-5 [&_*]:fill-current [&_*]:stroke-none">
                       <IconInternational />
                     </span>
                     <span>语言</span>

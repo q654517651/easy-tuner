@@ -19,31 +19,6 @@ function BackgroundBlur({ url }: BackgroundBlurProps) {
   );
 }
 
-// 类型标签组件
-interface TypeBadgeProps {
-  mediaType: 'image' | 'video' | 'single_control_image' | 'multi_control_image';
-  currentIndex?: number;
-}
-
-function TypeBadge({ mediaType, currentIndex = 0 }: TypeBadgeProps) {
-  if (mediaType === 'video') {
-    return (
-      <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
-        VIDEO
-      </div>
-    );
-  }
-
-  if ((mediaType === 'single_control_image' || mediaType === 'multi_control_image') && currentIndex > 0) {
-    return (
-      <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded">
-        控制图 {currentIndex}
-      </div>
-    );
-  }
-
-  return null;
-}
 
 // 图像视图组件
 interface ImageViewProps {
@@ -75,11 +50,19 @@ function VideoView({ url, filename }: VideoViewProps) {
   const { videoRef, isHovering, hoverBind } = useHoverVideo();
 
   return (
-    <div className="relative max-h-full max-w-full" {...hoverBind}>
+    <div className="relative w-full h-full flex items-center justify-center" {...hoverBind}>
+      {/* 视频首帧模糊背景 - 使用隐藏的 video 元素获取首帧 */}
+      <video
+        src={url}
+        className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl brightness-[0.6]"
+        muted
+        preload="metadata"
+      />
+
       <video
         ref={videoRef}
         src={url}
-        className="max-h-full max-w-full object-contain"
+        className="relative z-10 w-full h-full object-contain"
         muted
         loop
         playsInline
@@ -88,7 +71,7 @@ function VideoView({ url, filename }: VideoViewProps) {
 
       {/* 播放状态指示器 */}
       {!isHovering && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
           <div className="bg-black/50 rounded-full p-3">
             <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
               <path d="M8 5v14l11-7z"/>
@@ -133,6 +116,7 @@ export function MediaDisplay({
   filename,
   controlImages = [],
   onUploadControl,
+  onDeleteControl,
   selected,
   labeling,
   onSelect
@@ -163,14 +147,7 @@ export function MediaDisplay({
       {/* 内容层：object-contain，长边贴边 */}
       <div className="absolute inset-0 flex">
         <div className="flex-1 relative">
-          {/* 为控制图类型预留底部空间 */}
-          <div
-            className={`w-full h-full ${
-              (mediaType === 'single_control_image' || mediaType === 'multi_control_image')
-                ? 'pb-20' // 为控制图条预留空间
-                : ''
-            }`}
-          >
+          <div className="w-full h-full">
             {mediaType === 'image' && (
               <ImageView url={url} filename={filename} />
             )}
@@ -187,37 +164,39 @@ export function MediaDisplay({
             )}
           </div>
         </div>
-
-        {/* 控制图条（单图控制和多图控制类型） - 在底部横向排列，高z-index */}
-        {(mediaType === 'single_control_image' || mediaType === 'multi_control_image') && (
-          <div
-            className="absolute bottom-2 left-2 right-2 z-20"
-            onClick={(e) => e.stopPropagation()} // 阻止事件冒泡到MediaDisplay
-          >
-            <ControlStrip
-              images={[
-                { url, filename }, // 原图
-                controlImages[0] || {},
-                controlImages[1] || {},
-                controlImages[2] || {}
-              ] as [ControlImage, ControlImage, ControlImage, ControlImage]}
-              activeIndex={activeIndex}
-              onPick={(index) => {
-                setActiveIndex(index);
-              }}
-              onUpload={(index) => {
-                if (onUploadControl && index >= 1 && index <= 3) {
-                  onUploadControl(index as 1 | 2 | 3);
-                }
-              }}
-              controlType={mediaType}
-            />
-          </div>
-        )}
       </div>
 
-      {/* 底部类型标签 */}
-      <TypeBadge mediaType={mediaType} currentIndex={activeIndex} />
+      {/* 控制图条（单图控制和多图控制类型） - 悬浮在图片上方 */}
+      {(mediaType === 'single_control_image' || mediaType === 'multi_control_image') && (
+        <div
+          className="absolute bottom-2 left-4 right-4 z-20"
+          onClick={(e) => e.stopPropagation()} // 阻止事件冒泡到MediaDisplay
+        >
+          <ControlStrip
+            images={[
+              { url, filename }, // 原图
+              controlImages[0] || {},
+              controlImages[1] || {},
+              controlImages[2] || {}
+            ] as [ControlImage, ControlImage, ControlImage, ControlImage]}
+            activeIndex={activeIndex}
+            onPick={(index) => {
+              setActiveIndex(index);
+            }}
+            onUpload={(index) => {
+              if (onUploadControl && index >= 1 && index <= 3) {
+                onUploadControl(index as 1 | 2 | 3);
+              }
+            }}
+            onDelete={onDeleteControl ? (index) => {
+              if (index >= 1 && index <= 3) {
+                onDeleteControl(index as 1 | 2 | 3);
+              }
+            } : undefined}
+            controlType={mediaType}
+          />
+        </div>
+      )}
     </div>
   );
 }

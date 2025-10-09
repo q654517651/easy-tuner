@@ -81,97 +81,62 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 
-@dataclass
-class QwenImagePaths:
-    """Qwen-Image模型路径配置"""
-    dit_path: str = ""
-    vae_path: str = ""
-    text_encoder_path: str = ""
-
-
-@dataclass
-class FluxPaths:
-    """Flux模型路径配置"""
-    dit_path: str = ""
-    vae_path: str = ""
-    text_encoder_path: str = ""
-    clip_path: str = ""
-
-
-@dataclass
-class StableDiffusionPaths:
-    """Stable Diffusion模型路径配置"""
-    unet_path: str = ""
-    vae_path: str = ""
-    text_encoder_path: str = ""
-    clip_path: str = ""
-
-
-@dataclass
 class ModelPaths:
-    """模型路径配置 - 按训练类型分组"""
-    qwen_image: QwenImagePaths = None
-    flux: FluxPaths = None
-    stable_diffusion: StableDiffusionPaths = None
+    """模型路径配置 - 动态字典包装类，支持属性访问"""
 
-    def __post_init__(self):
-        if self.qwen_image is None:
-            self.qwen_image = QwenImagePaths()
-        if self.flux is None:
-            self.flux = FluxPaths()
-        if self.stable_diffusion is None:
-            self.stable_diffusion = StableDiffusionPaths()
+    def __init__(self, data: Optional[Dict[str, Any]] = None):
+        self._data = data or {}
 
+    def __getattr__(self, name: str):
+        if name.startswith('_'):
+            return object.__getattribute__(self, name)
 
-@dataclass
-class APIModelConfig:
-    """API模型配置"""
-    enabled: bool = False
-    api_key: str = ""
-    base_url: str = ""
-    model_name: str = ""
-    supports_video: bool = False
-    max_tokens: int = 2000
-    temperature: float = 0.7
-    
-    
-@dataclass 
-class LabelingModelConfigs:
-    """打标模型配置集合"""
-    gpt: APIModelConfig = None
-    lm_studio: APIModelConfig = None
-    local_qwen_vl: APIModelConfig = None
-    
-    def __post_init__(self):
-        if self.gpt is None:
-            self.gpt = APIModelConfig(
-                base_url="https://api.openai.com/v1",
-                model_name="gpt-4o",
-                supports_video=False
-            )
-        if self.lm_studio is None:
-            self.lm_studio = APIModelConfig(
-                enabled=True,
-                base_url="http://127.0.0.1:1234/v1",
-                model_name="local-model",
-                supports_video=True
-            )
-        if self.local_qwen_vl is None:
-            self.local_qwen_vl = APIModelConfig(
-                base_url="http://127.0.0.1:8000/v1",
-                model_name="qwen-vl",
-                supports_video=True
-            )
+        # 返回嵌套的字典包装对象
+        value = self._data.get(name)
+        if isinstance(value, dict):
+            return self._DictWrapper(value)
+        elif value is None:
+            # 如果不存在，返回空的字典包装对象，避免训练时取值失败
+            empty_dict = {}
+            self._data[name] = empty_dict
+            return self._DictWrapper(empty_dict)
+        return value
+
+    def __setattr__(self, name: str, value):
+        if name.startswith('_'):
+            object.__setattr__(self, name, value)
+        else:
+            self._data[name] = value
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return self._data
+
+    class _DictWrapper:
+        """嵌套字典包装器，支持属性访问"""
+        def __init__(self, data: Dict[str, Any]):
+            self._data = data
+
+        def __getattr__(self, name: str):
+            if name.startswith('_'):
+                return object.__getattribute__(self, name)
+            return self._data.get(name, "")
+
+        def __setattr__(self, name: str, value):
+            if name.startswith('_'):
+                object.__setattr__(self, name, value)
+            else:
+                self._data[name] = value
 
 
 @dataclass
 class LabelingConfig:
-    """打标配置"""
+    """打标配置 - 使用动态字典存储各 Provider 的配置"""
     default_prompt: str = ""
     translation_prompt: str = ""
     selected_model: str = "lm_studio"
     delay_between_calls: float = 2.0
-    models: LabelingModelConfigs = None
+    models: Dict[str, Dict[str, Any]] = None  # 动态字典：{provider_id: {field_key: value}}
 
     def __post_init__(self):
         if not self.default_prompt:
@@ -179,7 +144,7 @@ class LabelingConfig:
         if not self.translation_prompt:
             self.translation_prompt = "请将以下英文标注翻译成中文："
         if self.models is None:
-            self.models = LabelingModelConfigs()
+            self.models = {}
 
 
 @dataclass
@@ -273,6 +238,13 @@ def get_config() -> AppConfig:
     return _config
 
 
+def reload_config(config_path: Optional[str] = None) -> AppConfig:
+    """重新加载配置文件，刷新内存中的全局配置"""
+    global _config
+    _config = load_config(config_path)
+    return _config
+
+
 def load_config(config_path: Optional[str] = None) -> AppConfig:
     """加载配置文件"""
     if config_path is None:
@@ -288,49 +260,22 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
             # 更新配置
             if 'model_paths' in data:
                 mp_data = data['model_paths']
-                config.model_paths = ModelPaths()
-
-                # 处理嵌套的模型路径配置
-                if 'qwen_image' in mp_data:
-                    config.model_paths.qwen_image = QwenImagePaths(**mp_data['qwen_image'])
-                if 'flux' in mp_data:
-                    config.model_paths.flux = FluxPaths(**mp_data['flux'])
-                if 'stable_diffusion' in mp_data:
-                    config.model_paths.stable_diffusion = StableDiffusionPaths(**mp_data['stable_diffusion'])
-
-                # 向后兼容：处理旧版本的配置格式
-                if 'dit_path' in mp_data:
-                    config.model_paths.qwen_image.dit_path = mp_data['dit_path']
-                if 'vae_path' in mp_data:
-                    config.model_paths.qwen_image.vae_path = mp_data['vae_path']
-                if 'text_encoder_path' in mp_data:
-                    config.model_paths.qwen_image.text_encoder_path = mp_data['text_encoder_path']
+                # 直接使用 JSON 数据，不做任何 _groups 处理
+                config.model_paths = ModelPaths(mp_data)
                     
             if 'labeling' in data:
                 labeling_data = data['labeling']
-                config.labeling = LabelingConfig()
-                
-                # 基本配置
-                if 'default_prompt' in labeling_data:
-                    config.labeling.default_prompt = labeling_data['default_prompt']
-                if 'translation_prompt' in labeling_data:
-                    config.labeling.translation_prompt = labeling_data['translation_prompt']
-                if 'selected_model' in labeling_data:
-                    config.labeling.selected_model = labeling_data['selected_model']
-                elif 'model_type' in labeling_data:  # 向后兼容
-                    config.labeling.selected_model = labeling_data['model_type'].lower()
-                if 'delay_between_calls' in labeling_data:
-                    config.labeling.delay_between_calls = labeling_data['delay_between_calls']
-                
-                # 模型配置
-                if 'models' in labeling_data:
-                    models_data = labeling_data['models']
-                    config.labeling.models = LabelingModelConfigs()
-                    
-                    for model_key in ['gpt', 'lm_studio', 'local_qwen_vl']:
-                        if model_key in models_data:
-                            model_config = APIModelConfig(**models_data[model_key])
-                            setattr(config.labeling.models, model_key, model_config)
+
+                # 直接使用动态字典加载 models 配置
+                models_dict = labeling_data.get('models', {})
+
+                config.labeling = LabelingConfig(
+                    default_prompt=labeling_data.get('default_prompt', ''),
+                    translation_prompt=labeling_data.get('translation_prompt', ''),
+                    selected_model=labeling_data.get('selected_model') or labeling_data.get('model_type', 'lm_studio').lower(),  # 向后兼容
+                    delay_between_calls=labeling_data.get('delay_between_calls', 2.0),
+                    models=models_dict  # 直接使用字典，不转换为 dataclass
+                )
                             
             if 'training' in data:
                 config.training = TrainingConfig(**data['training'])
@@ -348,8 +293,9 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                     pass
 
         except Exception as e:
-            print(f"Warning: Failed to load config from {config_path}: {e}")
-            print("Using default configuration")
+            from ..utils.logger import log_warning
+            log_warning(f"加载配置失败 {config_path}: {e}")
+            # 使用默认配置
 
     return config
 
@@ -365,23 +311,17 @@ def save_config(config: Optional[AppConfig] = None, config_path: Optional[str] =
     # 确保配置目录存在
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
-    # 转换为字典
+    # 转换为字典（已包含 _groups）
+    model_paths_dict = config.model_paths.to_dict()
+
     config_data = {
-        'model_paths': {
-            'qwen_image': asdict(config.model_paths.qwen_image),
-            'flux': asdict(config.model_paths.flux),
-            'stable_diffusion': asdict(config.model_paths.stable_diffusion)
-        },
+        'model_paths': model_paths_dict,
         'labeling': {
             'default_prompt': config.labeling.default_prompt,
             'translation_prompt': config.labeling.translation_prompt,
             'selected_model': config.labeling.selected_model,
             'delay_between_calls': config.labeling.delay_between_calls,
-            'models': {
-                'gpt': asdict(config.labeling.models.gpt),
-                'lm_studio': asdict(config.labeling.models.lm_studio),
-                'local_qwen_vl': asdict(config.labeling.models.local_qwen_vl)
-            }
+            'models': config.labeling.models  # 直接使用字典，无需转换
         },
         'training': asdict(config.training),
         'musubi': asdict(config.musubi),
@@ -394,7 +334,8 @@ def save_config(config: Optional[AppConfig] = None, config_path: Optional[str] =
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Error: Failed to save config to {config_path}: {e}")
+        from ..utils.logger import log_error
+        log_error(f"保存配置失败 {config_path}: {e}")
 
 
 def get_config_path() -> str:

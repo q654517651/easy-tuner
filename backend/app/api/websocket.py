@@ -316,7 +316,7 @@ async def send_historical_logs(client_id: str, task_id: str, request: dict, webs
 
         # 若文件没有，回退到内存（兼容非运行态的历史）
         if total == 0:
-            from ..core.training.manager_new import get_training_manager
+            from ..core.training.manager import get_training_manager
             training_manager = get_training_manager()
             task = training_manager.get_task(task_id)
             if task and hasattr(task, 'logs') and task.logs:
@@ -398,6 +398,121 @@ async def send_transition_history(client_id: str, task_id: str, websocket: WebSo
 
     except Exception as e:
         raise e
+
+
+# -------- 安装进度 WebSocket --------
+@websocket_router.websocket("/installation/{installation_id}")
+async def installation_websocket(websocket: WebSocket, installation_id: str):
+    """安装进度 WebSocket 端点"""
+    client_id = f"install_{installation_id}_{uuid.uuid4().hex[:8]}"
+
+    try:
+        await websocket.accept()
+        logger.info(f"安装 WebSocket 连接建立: {client_id}")
+
+        # 发送连接确认
+        confirmation = {
+            'version': 1,
+            'type': 'connected',
+            'installation_id': installation_id,
+            'timestamp': asyncio.get_event_loop().time(),
+            'payload': {
+                'client_id': client_id,
+                'message': '连接建立成功'
+            }
+        }
+        await websocket.send_text(json.dumps(confirmation, ensure_ascii=False))
+
+        # 获取安装服务并发送历史日志
+        from ..services.installation_service import get_installation_service
+        installation_service = get_installation_service()
+        installation = installation_service.get_installation(installation_id)
+
+        if installation and installation.logs:
+            # 发送历史日志
+            for log_line in installation.logs:
+                log_msg = {
+                    'version': 1,
+                    'type': 'log',
+                    'installation_id': installation_id,
+                    'timestamp': asyncio.get_event_loop().time(),
+                    'payload': {'line': log_line}
+                }
+                await websocket.send_text(json.dumps(log_msg, ensure_ascii=False))
+
+            # 发送当前状态
+            state_msg = {
+                'version': 1,
+                'type': 'state',
+                'installation_id': installation_id,
+                'timestamp': asyncio.get_event_loop().time(),
+                'payload': {'state': installation.state.value}
+            }
+            await websocket.send_text(json.dumps(state_msg, ensure_ascii=False))
+
+        # 订阅事件
+        async def on_log(event_data):
+            if event_data.get('installation_id') == installation_id:
+                msg = {
+                    'version': 1,
+                    'type': 'log',
+                    'installation_id': installation_id,
+                    'timestamp': asyncio.get_event_loop().time(),
+                    'payload': {'line': event_data.get('line', '')}
+                }
+                try:
+                    await websocket.send_text(json.dumps(msg, ensure_ascii=False))
+                except Exception as e:
+                    logger.debug(f"发送日志失败: {e}")
+
+        async def on_state(event_data):
+            if event_data.get('installation_id') == installation_id:
+                msg = {
+                    'version': 1,
+                    'type': 'state',
+                    'installation_id': installation_id,
+                    'timestamp': asyncio.get_event_loop().time(),
+                    'payload': {'state': event_data.get('state', '')}
+                }
+                try:
+                    await websocket.send_text(json.dumps(msg, ensure_ascii=False))
+                except Exception as e:
+                    logger.debug(f"发送状态失败: {e}")
+
+        from ..core.state.events import get_event_bus
+        event_bus = get_event_bus()
+        event_bus.subscribe('installation.log', on_log)
+        event_bus.subscribe('installation.state', on_state)
+
+        try:
+            # 保持连接
+            while True:
+                data = await websocket.receive_text()
+                message = json.loads(data)
+
+                # 处理心跳
+                if message.get('type') == 'ping':
+                    pong = {
+                        'version': 1,
+                        'type': 'pong',
+                        'installation_id': installation_id,
+                        'timestamp': asyncio.get_event_loop().time(),
+                        'payload': {}
+                    }
+                    await websocket.send_text(json.dumps(pong, ensure_ascii=False))
+        except WebSocketDisconnect:
+            logger.info(f"安装 WebSocket 断开: {client_id}")
+        except Exception as e:
+            logger.error(f"安装 WebSocket 内部异常: {e}", exc_info=True)
+        finally:
+            # 确保总是清理订阅
+            event_bus.unsubscribe('installation.log', on_log)
+            event_bus.unsubscribe('installation.state', on_state)
+
+    except Exception as e:
+        logger.error(f"安装 WebSocket 初始化异常: {e}", exc_info=True)
+    finally:
+        logger.info(f"安装 WebSocket 连接关闭: {client_id}")
 
 
 # 健康检查和统计端点

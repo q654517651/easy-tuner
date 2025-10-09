@@ -11,14 +11,14 @@ from ..models.training import (
     TrainingModelSpec, ParameterGroup, ParameterField, TrainingConfigSchema,
     CLIPreviewRequest, CLIPreviewResponse, TrainingStats
 )
-from ..core.training.manager_new import get_training_manager
+from ..core.training.manager import get_training_manager
 from ..core.training.models import (
     list_models, get_model, get_fields_by_group, build_cli_args,
     ParameterGroup as CoreParameterGroup, QwenImageConfig, field_enabled,
     build_toml_dict, dumps_toml
 )
 from ..core.dataset.manager import get_dataset_manager
-from ..utils.exceptions import TrainingNotFoundError, DatasetNotFoundError
+from ..core.exceptions import TrainingNotFoundError, DatasetNotFoundError
 from ..utils.logger import log_info, log_error
 from .tb_event_service import get_tb_event_service
 
@@ -176,7 +176,7 @@ class TrainingService:
             toml_path = trainer._create_dataset_config(task, preview_mode=True)
 
             # 使用预览模式的路径 (统一目录结构)
-            training_dir = Path("workspace/tasks/preview")
+            training_dir = Path(self.config.storage.workspace_root) / "tasks" / "preview"
 
             # 生成CLI命令（预览模式）
             cmd = trainer._build_training_command(task, toml_path, training_dir, preview_mode=True)
@@ -245,7 +245,11 @@ pause
                 # 验证数据集是否存在
                 dataset = self._dataset_manager.get_dataset(request.dataset_id)
                 if not dataset:
-                    raise DatasetNotFoundError(request.dataset_id)
+                    raise DatasetNotFoundError(
+                        message=f"Dataset {request.dataset_id} not found",
+                        detail={"dataset_id": request.dataset_id},
+                        error_code="DATASET_NOT_FOUND",
+                    )
 
                 # 获取训练模型配置类
                 spec = get_model(request.training_type)
@@ -449,6 +453,19 @@ pause
     def list_sample_images(self, task_id: str) -> List[Dict[str, str]]:
         """获取训练任务的采样图片列表"""
         try:
+            # 优先委派 core.manager，若无结果再回退到本地扫描
+            items = self._training_manager.list_task_samples(task_id)
+            if items:
+                result: List[Dict[str, str]] = []
+                for it in items:
+                    rel_path = it.get("rel_path", "")
+                    result.append({
+                        "filename": it.get("filename", Path(rel_path).name),
+                        "url": f"/api/v1/training/tasks/{task_id}/files/{rel_path}"
+                    })
+                result.sort(key=lambda x: x["filename"])
+                return result
+
             task_dir = Path(f"workspace/tasks/{task_id}")
             sample_dir = task_dir / "output" / "sample"
 
@@ -459,9 +476,10 @@ pause
             sample_images = []
             for img_file in sample_dir.glob("*"):
                 if img_file.is_file() and img_file.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']:
+                    rel_path = f"output/sample/{img_file.name}"
                     sample_images.append({
                         "filename": img_file.name,
-                        "url": f"/api/v1/training/tasks/{task_id}/files/sample/{img_file.name}"
+                        "url": f"/api/v1/training/tasks/{task_id}/files/{rel_path}"
                     })
 
             # 按文件名排序
@@ -475,6 +493,19 @@ pause
     def list_artifacts(self, task_id: str) -> List[Dict[str, str]]:
         """获取训练任务的模型文件列表"""
         try:
+            # 优先委派 core.manager，若无结果再回退到本地扫描
+            items = self._training_manager.list_task_artifacts(task_id)
+            if items:
+                result: List[Dict[str, str]] = []
+                for it in items:
+                    rel_path = it.get("rel_path", "")
+                    result.append({
+                        "filename": it.get("filename", Path(rel_path).name),
+                        "url": f"/api/v1/training/tasks/{task_id}/files/{rel_path}"
+                    })
+                result.sort(key=lambda x: x["filename"])
+                return result
+
             task_dir = Path(f"workspace/tasks/{task_id}")
             output_dir = task_dir / "output"
 

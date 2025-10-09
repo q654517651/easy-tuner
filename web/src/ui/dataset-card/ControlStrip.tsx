@@ -7,6 +7,7 @@ interface ControlStripProps {
   activeIndex: number;
   onPick: (index: number) => void;
   onUpload: (index: number) => void; // 1-3，语义清晰（控制图索引）
+  onDelete?: (index: number) => void; // 删除控制图
   controlType: 'single_control_image' | 'multi_control_image'; // 控制图类型
 }
 
@@ -17,52 +18,49 @@ interface ThumbnailItemProps {
   isActive: boolean;
   onPick: () => void;
   onUpload?: () => void; // 可选：仅控制图槽位有上传功能
+  onDelete?: () => void; // 可选：删除功能
 }
 
-function ThumbnailItem({ image, index, isActive, onPick, onUpload }: ThumbnailItemProps) {
+function ThumbnailItem({ image, index, isActive, onPick, onUpload, onDelete }: ThumbnailItemProps) {
   const hasContent = image.url && image.url.trim() !== '';
 
-  // 激活状态样式
-  const activeClasses = isActive
-    ? "ring-2 ring-blue-500 ring-offset-1"
-    : "ring-1 ring-gray-200";
+  // 统一的 ring 样式：选中时蓝色，未选中时白色半透明；悬浮时加粗
+  const ringClasses = isActive
+    ? "ring-2 ring-blue-500 hover:ring-[3px]"
+    : "ring-1 ring-white/20 hover:ring-2 hover:ring-white/40";
 
-  // 悬浮效果
-  const hoverClasses = "hover:ring-2 hover:ring-blue-300 hover:scale-105";
+  // 悬浮缩放效果
+  const hoverScaleClasses = "hover:scale-105";
 
   if (!hasContent && onUpload) {
     // 空控制图槽位 - 显示上传按钮
     return (
-      <div className="flex-1 min-h-0 relative">
-        <Button
-          size="sm"
-          variant="bordered"
-          className={`w-full h-full p-0 rounded-lg ${activeClasses} ${hoverClasses} transition-all duration-200`}
-          onPress={onUpload}
-        >
-          <div className="flex flex-col items-center justify-center text-xs text-gray-500">
-            <div className="text-base">+</div>
-            <div className="text-xs">上传</div>
-          </div>
-        </Button>
-      </div>
+      <button
+        className={`w-12 h-12 shrink-0 rounded-lg bg-black/40 backdrop-blur ${ringClasses} ${hoverScaleClasses} transition-all duration-200 flex items-center justify-center`}
+        onClick={onUpload}
+      >
+        <div className="flex flex-col items-center justify-center text-white/80">
+          <div className="text-lg leading-none">+</div>
+        </div>
+      </button>
     );
   }
 
   if (!hasContent) {
     // 原图槽位但无内容（不应该发生）
     return (
-      <div className={`flex-1 min-h-0 rounded-lg bg-gray-100 flex items-center justify-center ${activeClasses}`}>
-        <div className="text-gray-400 text-xs">无图</div>
+      <div className={`w-12 h-12 shrink-0 rounded-lg bg-black/40 backdrop-blur flex items-center justify-center ${ringClasses}`}>
+        <div className="text-white/60 text-xs">无图</div>
       </div>
     );
   }
 
   // 有内容的缩略图
   return (
-    <div className="flex-1 min-h-0 relative">
+    <div className="relative w-12 h-12 shrink-0 group/ctrl-thumb">
       <button
-        className={`w-full h-full rounded-lg overflow-hidden bg-gray-100 ${activeClasses} ${hoverClasses} transition-all duration-200`}
+        type="button"
+        className={`w-full h-full rounded-lg overflow-hidden bg-black/40 backdrop-blur ${ringClasses} ${hoverScaleClasses} transition-all duration-200 relative`}
         onClick={onPick}
       >
         <img
@@ -78,27 +76,35 @@ function ThumbnailItem({ image, index, isActive, onPick, onUpload }: ThumbnailIt
         />
 
         {/* 索引标签 */}
-        <div className="absolute bottom-1 right-1 bg-black/60 text-white text-xs px-1 py-0.5 rounded">
+        <div className="absolute bottom-0.5 right-0.5 bg-black/70 text-white text-[10px] px-1 py-0.5 rounded leading-none">
           {index === 0 ? '原' : index}
         </div>
-
-        {/* 激活指示器 */}
-        {isActive && (
-          <div className="absolute top-1 right-1 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
-            <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-          </div>
-        )}
       </button>
+
+      {/* 删除按钮 - 仅控制图显示，在外层 div 中不会被裁切 */}
+      {onDelete && index > 0 && (
+        <button
+          type="button"
+          aria-label="删除控制图"
+          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover/ctrl-thumb:opacity-100 transition-opacity duration-200 hover:bg-red-600 z-10"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <span className="text-white text-xs leading-none">×</span>
+        </button>
+      )}
     </div>
   );
 }
 
-export function ControlStrip({ images, activeIndex, onPick, onUpload, controlType }: ControlStripProps) {
+export function ControlStrip({ images, activeIndex, onPick, onUpload, onDelete, controlType }: ControlStripProps) {
   // 根据控制图类型确定可用的控制图槽位数量
   const maxControlSlots = controlType === 'single_control_image' ? 1 : 3;
 
   return (
-    <div className="flex flex-row gap-2 p-2 h-16 bg-black/20 backdrop-blur-sm rounded-lg">
+    <div className="flex flex-row gap-2">
       {images.map((image, index) => {
         // 原图(index=0)始终显示，控制图根据类型限制显示数量
         const shouldShow = index === 0 || index <= maxControlSlots;
@@ -115,6 +121,7 @@ export function ControlStrip({ images, activeIndex, onPick, onUpload, controlTyp
             isActive={activeIndex === index}
             onPick={() => onPick(index)}
             onUpload={index >= 1 && index <= maxControlSlots ? () => onUpload(index) : undefined}
+            onDelete={index >= 1 && onDelete ? () => onDelete(index) : undefined}
           />
         );
       })}

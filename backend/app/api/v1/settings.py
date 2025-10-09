@@ -1,18 +1,18 @@
 """
-设置 API 路由（与核心配置统一）
+设置 API 路由：配置读取、保存与环境修复
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from dataclasses import asdict
-import os
 from pathlib import Path
 
-from ...core.config import get_config, save_config
+from ...core.config import get_config, save_config, reload_config
 from ...core.schema_manager import schema_manager
 from ...utils.git_utils import check_submodule_status, get_musubi_releases, clear_musubi_cache
 from ...services.musubi_fix_service import musubi_fix_service
+from ...utils.logger import log_info
 
 
 router = APIRouter()
@@ -27,8 +27,8 @@ class AppSettings(BaseModel):
 def serialize_config() -> Dict[str, Any]:
     cfg = get_config()
 
-    # 动态生成model_paths配置
-    model_paths = {}
+    # 动态按 schema 导出 model_paths
+    model_paths: Dict[str, Dict[str, Any]] = {}
     valid_paths = schema_manager.get_valid_paths()
 
     for path in valid_paths:
@@ -39,7 +39,6 @@ def serialize_config() -> Dict[str, Any]:
                 if model_key not in model_paths:
                     model_paths[model_key] = {}
 
-                # 获取实际值
                 value = getattr(getattr(cfg.model_paths, model_key, object()), field_key, "")
                 model_paths[model_key][field_key] = value
 
@@ -51,11 +50,7 @@ def serialize_config() -> Dict[str, Any]:
             "translation_prompt": cfg.labeling.translation_prompt,
             "selected_model": cfg.labeling.selected_model,
             "delay_between_calls": cfg.labeling.delay_between_calls,
-            "models": {
-                "gpt": asdict(cfg.labeling.models.gpt),
-                "lm_studio": asdict(cfg.labeling.models.lm_studio),
-                "local_qwen_vl": asdict(cfg.labeling.models.local_qwen_vl),
-            }
+            "models": cfg.labeling.models  # 直接使用字典，无需转换
         }
     }
 
@@ -63,35 +58,33 @@ def serialize_config() -> Dict[str, Any]:
 @router.get("/settings")
 async def get_settings():
     try:
-        return {"success": True, "message": "配置获取成功", "data": serialize_config()}
+        # 获取当前 musubi 版本信息
+        version_info = check_submodule_status()
+
+        # 序列化配置
+        config_data = serialize_config()
+
+        # 更新 musubi 版本信息
+        config_data["musubi"]["version"] = version_info.get("version", "")
+        config_data["musubi"]["status"] = version_info.get("status", "unknown")
+
+        return {"success": True, "message": "配置获取成功", "data": config_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"配置获取失败: {str(e)}")
-
-
 
 
 @router.post("/settings/musubi/check-status")
 async def check_musubi_status():
     try:
-        # 获取项目根目录
-        current_dir = Path(__file__).resolve()
-        project_root = None
+        # 获取项目根目录（从环境管理器）
+        from ...core.environment import get_paths
 
-        # 向上查找项目根目录
-        while current_dir.parent != current_dir:
-            if (current_dir / "runtime" / "engines" / "musubi-tuner").exists():
-                project_root = str(current_dir)
-                break
-            current_dir = current_dir.parent
-
-        if project_root is None:
-            # 如果没找到，尝试相对路径
-            backend_dir = Path(__file__).resolve().parent.parent.parent.parent
-            project_root = str(backend_dir.parent)
+        paths = get_paths()
+        project_root = str(paths.project_root)
 
         status_info = check_submodule_status(project_root)
 
-        # 更新配置中的状态信息
+        # 回写最新状态
         cfg = get_config()
         cfg.musubi.status = status_info.get("status", "error")
         cfg.musubi.version = status_info.get("version", "")
@@ -116,25 +109,15 @@ async def check_musubi_status():
 
 @router.get("/settings/musubi/releases")
 async def get_musubi_releases_api(limit: int = 10, force_refresh: bool = False):
-    """获取musubi发布历史"""
+    """获取 musubi 发布历史"""
     try:
-        # 获取项目根目录
-        current_dir = Path(__file__).resolve()
-        project_root = None
+        # 获取项目根目录（从环境管理器）
+        from ...core.environment import get_paths
 
-        # 向上查找项目根目录
-        while current_dir.parent != current_dir:
-            if (current_dir / "runtime" / "engines" / "musubi-tuner").exists():
-                project_root = str(current_dir)
-                break
-            current_dir = current_dir.parent
+        paths = get_paths()
+        project_root = str(paths.project_root)
 
-        if project_root is None:
-            # 如果没找到，尝试相对路径
-            backend_dir = Path(__file__).resolve().parent.parent.parent.parent
-            project_root = str(backend_dir.parent)
-
-        releases = get_musubi_releases(project_root, min(limit, 20), force_refresh)  # 最多20个
+        releases = get_musubi_releases(project_root, min(limit, 20), force_refresh)
 
         return {
             "success": True,
@@ -145,109 +128,100 @@ async def get_musubi_releases_api(limit: int = 10, force_refresh: bool = False):
         raise HTTPException(status_code=500, detail=f"获取发布历史失败: {str(e)}")
 
 
-@router.delete("/settings/musubi/releases/cache")
+@router.delete("/settings/musubi/releases/cache", status_code=204)
 async def clear_musubi_releases_cache():
-    """清除musubi发布历史缓存"""
+    """清除 musubi 发布历史缓存（返回 204）"""
     try:
-        # 获取项目根目录
-        current_dir = Path(__file__).resolve()
-        project_root = None
+        # 获取项目根目录（从环境管理器）
+        from ...core.environment import get_paths
 
-        # 向上查找项目根目录
-        while current_dir.parent != current_dir:
-            if (current_dir / "runtime" / "engines" / "musubi-tuner").exists():
-                project_root = str(current_dir)
-                break
-            current_dir = current_dir.parent
+        paths = get_paths()
+        project_root = str(paths.project_root)
 
-        if project_root is None:
-            # 如果没找到，尝试相对路径
-            backend_dir = Path(__file__).resolve().parent.parent.parent.parent
-            project_root = str(backend_dir.parent)
-
-        success = clear_musubi_cache(project_root)
-
-        return {
-            "success": success,
-            "message": "缓存清除成功" if success else "缓存清除失败或缓存不存在"
-        }
+        clear_musubi_cache(project_root)
+        return Response(status_code=204)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"清除缓存失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"缓存清除失败: {str(e)}")
 
 
 @router.get("/settings/model-paths/schema")
 async def get_model_paths_schema():
-    """获取模型路径schema（从缓存，毫秒级响应）"""
+    """获取模型路径 schema（含缓存）"""
     try:
         schema = schema_manager.get_schema()
         return {"success": True, "data": schema}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取Schema失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取 Schema 失败: {str(e)}")
 
 
 @router.put("/settings/model-paths")
 async def update_model_paths_settings(request: Dict[str, Any]):
-    """更新模型路径设置 - 基于schema验证和清理"""
+    """更新模型路径设置 - 经过 schema 清洗与校验"""
     try:
-        # 1. 验证和清理数据
         cleaned_settings = schema_manager.clean_config(request)
 
-        # 2. 获取现有配置并更新
         cfg = get_config()
 
-        # 3. 更新model_paths配置
+        # 更新 model_paths（动态更新）
         cleaned_model_paths = cleaned_settings.get("model_paths", {})
-        if cleaned_model_paths:
-            # 更新现有配置结构
-            if hasattr(cfg, 'model_paths'):
-                for model_key, model_config in cleaned_model_paths.items():
-                    if hasattr(cfg.model_paths, model_key):
-                        for field_key, field_value in model_config.items():
-                            if hasattr(getattr(cfg.model_paths, model_key), field_key):
-                                setattr(getattr(cfg.model_paths, model_key), field_key, field_value)
+        if cleaned_model_paths and hasattr(cfg, 'model_paths'):
+            for model_key, model_config in cleaned_model_paths.items():
+                if isinstance(model_config, dict):
+                    if model_key not in cfg.model_paths._data:
+                        cfg.model_paths._data[model_key] = {}
+                    # 更新字段值（包括 _groups）
+                    for field_key, field_value in model_config.items():
+                        cfg.model_paths._data[model_key][field_key] = field_value
 
-        # 4. 保存配置
         save_config(cfg)
 
-        # 5. 记录清理日志
+        # 重新加载配置，刷新内存中的全局配置
+        reload_config()
+
+        # 刷新环境管理器中的workspace路径
+        from ...core.environment import get_env_manager
+        get_env_manager().refresh_from_config()
+
+        # 记录清洗日志
         original_paths = request.get("model_paths", {})
         cleaned_paths = cleaned_model_paths
         removed_count = len(str(original_paths)) - len(str(cleaned_paths))
         if removed_count > 0:
-            print(f"清理了废弃的模型路径配置")
+            log_info("已清洗掉不在 Schema 中的模型路径字段")
 
         return {"success": True, "message": "模型路径设置已保存"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存模型路径设置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新模型路径设置失败: {str(e)}")
 
 
 @router.put("/settings")
 async def update_all_settings(request: Dict[str, Any]):
-    """更新所有设置 - 基于schema验证和清理"""
+    """更新全部设置 - 经过 schema 清洗与校验"""
     try:
-        # 1. 验证和清理数据
         cleaned_settings = schema_manager.clean_config(request)
 
-        # 2. 获取现有配置
         cfg = get_config()
 
-        # 3. 更新musubi配置
+        # musubi
         musubi_data = cleaned_settings.get("musubi", {})
         for k, v in musubi_data.items():
             if hasattr(cfg.musubi, k):
                 setattr(cfg.musubi, k, v)
 
-        # 4. 更新model_paths配置（使用清理后的数据）
+        # model_paths（动态更新）
         cleaned_model_paths = cleaned_settings.get("model_paths", {})
         if cleaned_model_paths and hasattr(cfg, 'model_paths'):
             for model_key, model_config in cleaned_model_paths.items():
-                if hasattr(cfg.model_paths, model_key):
+                if isinstance(model_config, dict):
+                    # 确保模型配置存在
+                    if model_key not in cfg.model_paths._data:
+                        cfg.model_paths._data[model_key] = {}
+                    # 更新字段值（包括 _groups）
                     for field_key, field_value in model_config.items():
-                        if hasattr(getattr(cfg.model_paths, model_key), field_key):
-                            setattr(getattr(cfg.model_paths, model_key), field_key, field_value)
+                        cfg.model_paths._data[model_key][field_key] = field_value
 
-        # 5. 更新labeling配置
+        # labeling
         lb = cleaned_settings.get("labeling", {})
         if "default_prompt" in lb:
             cfg.labeling.default_prompt = str(lb["default_prompt"]) or cfg.labeling.default_prompt
@@ -261,35 +235,36 @@ async def update_all_settings(request: Dict[str, Any]):
             except Exception:
                 pass
 
+        # 更新 models 配置（现在是字典）
         models = lb.get("models", {})
-        for key in ("gpt", "lm_studio", "local_qwen_vl"):
-            if key in models:
-                m = models[key]
-                target = getattr(cfg.labeling.models, key)
-                for mk in ("api_key", "base_url", "model_name", "supports_video", "max_tokens", "temperature", "enabled"):
-                    if mk in m and hasattr(target, mk):
-                        setattr(target, mk, m[mk])
+        if models and isinstance(models, dict):
+            # 直接更新字典
+            cfg.labeling.models = models
 
-        # 6. 保存配置
         save_config(cfg)
+
+        # 重新加载配置，刷新内存中的全局配置
+        reload_config()
+
+        # 刷新环境管理器中的workspace路径
+        from ...core.environment import get_env_manager
+        get_env_manager().refresh_from_config()
 
         return {"success": True, "message": "设置已保存"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"保存设置失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新设置失败: {str(e)}")
 
 
 class FixEnvironmentRequest(BaseModel):
-    locale: Optional[str] = None  # 语言配置，如 "zh-CN", "en-US"
+    locale: Optional[str] = None  # 例如 "zh-CN", "en-US"
 
 
 @router.post("/settings/musubi/fix-environment")
 async def fix_musubi_environment(request: FixEnvironmentRequest = FixEnvironmentRequest()):
-    """修复训练环境 - 重新运行setup_portable_uv.ps1"""
+    """修复训练环境（调用 setup_portable_uv.ps1）- 旧版阻塞式"""
     try:
-        # 根据语言配置决定是否使用国内源
         use_china_mirror = request.locale and request.locale.startswith('zh')
-
         success, message = await musubi_fix_service.fix_environment(use_china_mirror=use_china_mirror)
         return {
             "success": success,
@@ -299,9 +274,86 @@ async def fix_musubi_environment(request: FixEnvironmentRequest = FixEnvironment
         raise HTTPException(status_code=500, detail=f"修复训练环境失败: {str(e)}")
 
 
+# ==================== 新的流式安装 API ====================
+
+class StartInstallationRequest(BaseModel):
+    locale: Optional[str] = None
+
+
+@router.post("/installation/start")
+async def start_installation(request: StartInstallationRequest = StartInstallationRequest()):
+    """
+    启动安装任务（异步流式）
+
+    返回 installation_id，前端通过 WebSocket 订阅实时进度
+    """
+    try:
+        from ...services.installation_service import get_installation_service
+
+        use_china_mirror = request.locale and request.locale.startswith('zh')
+        installation_service = get_installation_service()
+        installation_id = await installation_service.start_installation(use_china_mirror=use_china_mirror)
+
+        return {
+            "success": True,
+            "message": "安装任务已启动",
+            "data": {
+                "installation_id": installation_id
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"启动安装失败: {str(e)}")
+
+
+@router.post("/installation/{installation_id}/cancel")
+async def cancel_installation(installation_id: str):
+    """取消安装任务"""
+    try:
+        from ...services.installation_service import get_installation_service
+
+        installation_service = get_installation_service()
+        success, message = await installation_service.cancel_installation(installation_id)
+
+        return {
+            "success": success,
+            "message": message
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取消安装失败: {str(e)}")
+
+
+@router.get("/installation/{installation_id}/status")
+async def get_installation_status(installation_id: str):
+    """获取安装任务状态"""
+    try:
+        from ...services.installation_service import get_installation_service
+
+        installation_service = get_installation_service()
+        installation = installation_service.get_installation(installation_id)
+
+        if not installation:
+            raise HTTPException(status_code=404, detail="安装任务不存在")
+
+        return {
+            "success": True,
+            "data": {
+                "installation_id": installation.id,
+                "state": installation.state.value,
+                "created_at": installation.created_at.isoformat() if installation.created_at else None,
+                "started_at": installation.started_at.isoformat() if installation.started_at else None,
+                "completed_at": installation.completed_at.isoformat() if installation.completed_at else None,
+                "error_message": installation.error_message
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取安装状态失败: {str(e)}")
+
+
 @router.post("/settings/musubi/fix-installation")
 async def fix_musubi_installation():
-    """修复训练器安装 - 更新musubi-tuner子模块"""
+    """修复训练安装（musubi-tuner 子模块）"""
     try:
         success, message = await musubi_fix_service.fix_trainer_installation()
         return {
@@ -309,12 +361,83 @@ async def fix_musubi_installation():
             "message": message
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"修复训练器安装失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"修复训练安装失败: {str(e)}")
+
+
+@router.post("/settings/musubi/switch-version")
+async def switch_musubi_version(request: Dict[str, Any]):
+    """切换 musubi-tuner 到指定版本"""
+    try:
+        version = request.get("version")
+        commit_hash = request.get("commit_hash")
+
+        if not version or not commit_hash:
+            raise HTTPException(status_code=400, detail="缺少版本号或commit hash")
+
+        # 获取项目路径
+        from ...core.environment import get_paths
+        paths = get_paths()
+        musubi_dir = paths.musubi_dir
+
+        if not musubi_dir.exists():
+            raise HTTPException(status_code=404, detail="musubi-tuner 目录不存在")
+
+        # 执行 git checkout
+        import subprocess
+        log_info(f"切换 musubi-tuner 到版本: {version} ({commit_hash})")
+
+        # 1. 先 fetch 确保有最新的 tags
+        fetch_result = subprocess.run(
+            ["git", "fetch", "--tags"],
+            cwd=str(musubi_dir),
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if fetch_result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"获取远程标签失败: {fetch_result.stderr}"
+            )
+
+        # 2. 切换到指定 commit
+        checkout_result = subprocess.run(
+            ["git", "checkout", commit_hash],
+            cwd=str(musubi_dir),
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if checkout_result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"切换版本失败: {checkout_result.stderr}"
+            )
+
+        log_success(f"成功切换到版本: {version}")
+
+        # 更新配置中的版本信息
+        cfg = get_config()
+        cfg.musubi.version = version
+        save_config(cfg)
+
+        return {
+            "success": True,
+            "message": f"成功切换到版本 {version}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_error(f"切换版本失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"切换版本失败: {str(e)}")
 
 
 @router.get("/settings/musubi/environment-status")
 async def get_musubi_environment_status():
-    """检查训练环境状态"""
+    """获取训练环境状态"""
     try:
         status = await musubi_fix_service.check_environment_status()
         return {

@@ -36,6 +36,13 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.invoke("open-folder", { taskId, kind }) as Promise<{ ok: boolean; error?: string }>,
   // 选择工作区目录
   selectWorkspace: () => ipcRenderer.invoke('system:selectWorkspaceDialog') as Promise<{ canceled: boolean; path: string }>,
-  // 安装运行时（占位）
-  runtimeInstall: () => ipcRenderer.invoke('runtime:install') as Promise<{ ok: boolean; message?: string }>,
+});
+
+// ElectronAPI（统一接口，供前端使用）
+contextBridge.exposeInMainWorld("electronAPI", {
+  // 通用 IPC invoke 方法
+  invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
+
+  // 后端健康检查
+  checkBackendHealth: () => ipcRenderer.invoke("backend:checkHealth") as Promise<{ ready: boolean; port: number }>,
 });

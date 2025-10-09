@@ -21,7 +21,8 @@ function pickMediaProps(props: DatasetCardProps, onSelect?: (selected: boolean) 
     return {
       ...baseProps,
       controlImages: props.controlImages,
-      onUploadControl: props.onUploadControl
+      onUploadControl: props.onUploadControl,
+      onDeleteControl: props.onDeleteControl
     };
   }
 
