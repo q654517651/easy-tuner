@@ -194,7 +194,11 @@ class TrainingService:
 
             # 生成批处理脚本
             rel_to_root_from_script = "../../.."  # 假设在训练目录下
-            musubi_src_rel = "runtime/engines/musubi-tuner/src"
+
+            # ✨ 从环境管理器获取 musubi_src 路径（相对于 workspace_root）
+            from ..core.environment import get_paths
+            paths = get_paths()
+            musubi_src_rel = paths.musubi_src.relative_to(paths.workspace_root).as_posix()
 
             # 构建多行格式
             cmd_lines = []
@@ -219,9 +223,12 @@ set "PYTHONIOENCODING=utf-8"
 pause
 """
 
+            # ✨ script_path 也使用环境管理器路径（相对于 workspace_root）
+            script_rel = (paths.musubi_src / spec.script_train).relative_to(paths.workspace_root).as_posix()
+
             return CLIPreviewResponse(
                 command=" ".join(flat_cmd),
-                script_path=f"runtime/engines/musubi-tuner/src/{spec.script_train}",
+                script_path=script_rel,
                 args=flat_cmd[1:],  # 去掉脚本路径
                 working_directory=str(trainer._PROJECT_ROOT),
                 toml_content=toml_content,
@@ -428,8 +435,11 @@ pause
         try:
             from pathlib import Path
 
-            # 创建任务目录
-            task_dir = Path(self.config.storage.workspace_root) / "tasks" / task_id
+            # 获取任务目录（支持新的 task_id--name 格式）
+            task_dir = self._training_manager.get_task_dir(task_id)
+            if not task_dir:
+                log_error(f"任务目录不存在: {task_id}")
+                return None
             task_dir.mkdir(parents=True, exist_ok=True)
 
             # 创建sample_prompts.txt文件
@@ -466,7 +476,11 @@ pause
                 result.sort(key=lambda x: x["filename"])
                 return result
 
-            task_dir = Path(f"workspace/tasks/{task_id}")
+            # 获取任务目录（支持新的 task_id--name 格式）
+            task_dir = self._training_manager.get_task_dir(task_id)
+            if not task_dir:
+                log_error(f"任务目录不存在: {task_id}")
+                return []
             sample_dir = task_dir / "output" / "sample"
 
             if not sample_dir.exists():
@@ -506,7 +520,11 @@ pause
                 result.sort(key=lambda x: x["filename"])
                 return result
 
-            task_dir = Path(f"workspace/tasks/{task_id}")
+            # 获取任务目录（支持新的 task_id--name 格式）
+            task_dir = self._training_manager.get_task_dir(task_id)
+            if not task_dir:
+                log_error(f"任务目录不存在: {task_id}")
+                return []
             output_dir = task_dir / "output"
 
             if not output_dir.exists():

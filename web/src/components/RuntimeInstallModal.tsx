@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button, addToast } from '@heroui/react';
-import { postJson } from '../services/api';
+import { postJson, readinessApi } from '../services/api';
 import InstallationProgressModal from './InstallationProgressModal';
 
 interface RuntimeInstallModalProps {
@@ -17,6 +17,19 @@ export default function RuntimeInstallModal({ isOpen, onClose, onSuccess }: Runt
   const doInstallRuntime = async () => {
     try {
       setStarting(true);
+
+      // 先检查 workspace 状态
+      const wsStatus = await readinessApi.getWorkspaceStatus();
+      if (wsStatus.data?.reason !== 'OK') {
+        addToast({
+          title: '工作区未设置',
+          description: '请先在「基础设置」中选择工作区目录',
+          color: 'warning',
+          timeout: 5000
+        });
+        onClose();
+        return;
+      }
 
       // 获取当前语言设置
       const locale = navigator.language || 'en-US';

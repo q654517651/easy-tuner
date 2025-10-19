@@ -5,8 +5,32 @@
 保持运行目录旁挂 runtime/ 与 workspace/ 目录。
 """
 
-# ---- Windows 事件循环策略设置（必须在最开始） ----
+# ---- Windows 编码设置（必须在最开始） ----
 import sys
+import io
+
+# 修复Windows GBK编码问题（支持emoji等Unicode字符）
+if sys.platform == 'win32':
+    # 设置控制台编码为UTF-8
+    try:
+        if hasattr(sys.stdout, 'buffer'):
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.buffer,
+                encoding='utf-8',
+                errors='replace',
+                line_buffering=True
+            )
+        if hasattr(sys.stderr, 'buffer'):
+            sys.stderr = io.TextIOWrapper(
+                sys.stderr.buffer,
+                encoding='utf-8',
+                errors='replace',
+                line_buffering=True
+            )
+    except Exception:
+        pass
+
+# ---- Windows 事件循环策略设置 ----
 if sys.platform == 'win32':
     import asyncio
     # 使用 ProactorEventLoop 以支持子进程（create_subprocess_exec）

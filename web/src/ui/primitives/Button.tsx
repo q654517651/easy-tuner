@@ -53,7 +53,7 @@ export const AppButton: React.FC<AppButtonProps> = ({
       variant={variant}
       size={sz}
       color={color as any}
-      className={["h-10", extra, className].filter(Boolean).join(" ")}
+      className={["h-8", extra, className].filter(Boolean).join(" ")}
       startContent={startIcon}
       endContent={endIcon}
       {...rest}

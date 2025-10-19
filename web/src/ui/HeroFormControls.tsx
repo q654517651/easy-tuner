@@ -1,26 +1,26 @@
 /**
  * HeroFormControls.tsx
  * -----------------------------------------------------------------------------
- * 基于 HeroUI 的表单控件组件库
+ * 基于 HeroUI 的表单控件组件库（统一表单控件解决方案）
  *
  * 包含的控件：
  * - HeroInput: 基于 HeroUI Input 的文本/数字输入框
  * - HeroSelect: 基于 HeroUI Select 的下拉选择框
  * - HeroSwitch: 基于 HeroUI Switch 的开关控件
  * - HeroTextarea: 基于 HeroUI Textarea 的多行文本输入框
- * - FormSection: 表单分区容器（复用原有组件）
+ * - FormGroup: 表单分组卡片容器
+ * - FormSection: 表单分区容器（带滚动定位）
  *
  * 设计特点：
- * - 使用 HeroUI 的大号尺寸 (size="lg")
- * - 标签作为 placeholder 显示
- * - 统一的接口设计，便于替换原有控件
- * - 保持与原有 FormControls 相同的 props 接口
+ * - 使用 HeroUI 的中号尺寸 (size="md")
+ * - 统一的背景色、边框和悬停效果
+ * - 完整的类型安全和 TypeScript 支持
+ * - 支持深色模式自适应
  * -----------------------------------------------------------------------------
  */
 
 import React from "react";
 import { Input, Select, SelectItem, Switch, Textarea } from "@heroui/react";
-import { FormSection } from "./FormControls"; // 复用原有的 FormSection
 
 /* ========= 类型定义 ========= */
 
@@ -211,7 +211,7 @@ export const HeroSelect: React.FC<HeroSelectProps> = ({
     }}
   >
     {options.map((option) => (
-      <SelectItem key={String(option.value)} value={option.value}>
+      <SelectItem key={String(option.value)}>
         {option.label}
       </SelectItem>
     ))}
@@ -234,7 +234,7 @@ export const HeroSwitch: React.FC<HeroSwitchProps> = ({
   checked,
   onChange,
   className,
-  description
+  description: _description
 }) => (
   <div
     className={`bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 rounded-xl hover:bg-black/4 dark:hover:bg-white/4 transition-colors ${className || ''}`}
@@ -287,16 +287,67 @@ export const HeroTextarea: React.FC<HeroTextareaProps> = ({
     errorMessage={errorMessage}
     className={className}
     classNames={{
-      inputWrapper: "shadow-none"
+      inputWrapper: "shadow-none bg-white dark:bg-[#2A2A2A] [border-width:1.5px] border-black/10 dark:border-white/5 px-4 py-2.5 " +
+          "hover:bg-black/4 dark:hover:bg-white/4 data-[hover=true]:bg-black/4 dark:data-[hover=true]:bg-white/4",
+      label: "!text-default-400"
     }}
     onChange={(e) => onChange(e.target.value)}
   />
 );
 
-/* ========= 导出复用组件 ========= */
+/* ========= 分组容器组件 ========= */
 
-// 导出 FormSection 以保持一致性
-export { FormSection };
+// 表单分组卡片：背景、圆角、padding=24，标题 14 加粗
+export interface FormGroupProps {
+  title: string;
+  anchorId?: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export const FormGroup: React.FC<FormGroupProps> = ({
+  title,
+  anchorId,
+  children,
+  className
+}) => (
+  <div
+    id={anchorId}
+    className={[
+      "rounded-2xl bg-[#F7F7F8] dark:bg-white/5 ring-1 ring-black/5 dark:ring-white/10 p-6",
+      className || ""
+    ].join(" ")}
+  >
+    <div className="text-[14px] font-semibold mb-4">{title}</div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+  </div>
+);
+
+// 表单分区容器：用于包装FormGroup，提供滚动定位和间距
+export interface FormSectionProps {
+  sectionId: string;
+  title: string;
+  children: React.ReactNode;
+  onRegisterRef?: (id: string, element: HTMLDivElement | null) => void;
+  className?: string;
+}
+
+export const FormSection: React.FC<FormSectionProps> = ({
+  sectionId,
+  title,
+  children,
+  onRegisterRef,
+  className
+}) => (
+  <div
+    ref={(el) => onRegisterRef?.(sectionId, el)}
+    className={className}
+  >
+    <FormGroup title={title} anchorId={sectionId}>
+      {children}
+    </FormGroup>
+  </div>
+);
 
 /* ========= 工具函数 ========= */
 

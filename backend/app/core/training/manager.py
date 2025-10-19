@@ -20,6 +20,7 @@ from ..state.events import EventBus
 from ...utils.logger import log_info, log_error, log_success
 from ...core.exceptions import TrainingError, TrainingNotFoundError
 from ..config import get_config
+from ..dataset.utils import gen_short_id, safeify_name
 
 
 class TrainingManager:
@@ -86,10 +87,26 @@ class TrainingManager:
                 if not self._workspace_ready:
                     raise TrainingError("工作区未就绪，请先在系统设置中选择工作区")
                 tasks_dir = self.tasks_dir
-            task_id = str(uuid.uuid4())
-            task_dir = tasks_dir / task_id
 
-            # 创建任务对象
+            # 生成短ID（固定8位）
+            task_id = gen_short_id(k=8)
+
+            # 生成安全任务名称
+            safe_task_name = safeify_name(name)
+
+            # 生成目录名（带去重）
+            base_dirname = f"{task_id}--{safe_task_name}"
+            final_dirname = base_dirname
+            counter = 2
+            while (tasks_dir / final_dirname).exists():
+                safe_name_with_counter = safeify_name(f"{name} {counter}")
+                final_dirname = f"{task_id}--{safe_name_with_counter}"
+                counter += 1
+
+            # 使用最终目录名创建路径
+            task_dir = tasks_dir / final_dirname
+
+            # 创建任务对象（task_id 保持为短ID）
             task = TrainingTask(
                 id=task_id,
                 name=name,
@@ -220,11 +237,11 @@ class TrainingManager:
                         self._save_task_to_file(task)
                 # 2) 截断 train.log（保持与 tail 兼容，截断而非删除）
                 try:
-                    task_dir = self.tasks_dir / task_id
-                    task_dir.mkdir(parents=True, exist_ok=True)
-                    log_file = task_dir / "train.log"
-                    with open(log_file, 'w', encoding='utf-8') as f:
-                        f.write("")
+                    task_dir = self._find_task_dir(task_id)
+                    if task_dir:
+                        log_file = task_dir / "train.log"
+                        with open(log_file, 'w', encoding='utf-8') as f:
+                            f.write("")
                 except Exception as e:
                     log_error(f"清空 train.log 失败: {e}")
                 # 2.5) 通知前端清屏（兼容前端监听的 training_task_restart 事件）
@@ -319,24 +336,13 @@ class TrainingManager:
             return False
 
     def _is_runtime_ready(self) -> bool:
-        """优先配置环境变量，最后回退 CWD/runtime，检查 python 是否存在。"""
+        """检查运行时环境是否就绪（使用环境管理器的统一检测）"""
         try:
-            base: Optional[Path] = None
-            # 1) 配置里的 runtime 根（如果有）
-            cfg = getattr(self, "config", None)
-            if cfg and hasattr(cfg, "paths") and getattr(cfg.paths, "runtime_root", None):
-                base = Path(cfg.paths.runtime_root)
-            # 2) 环境变量
-            if base is None:
-                env_rt = os.environ.get("EASYTUNER_RUNTIME")
-                if env_rt:
-                    base = Path(env_rt)
-            # 3) 回退：CWD/runtime
-            if base is None:
-                base = Path(os.getcwd()) / "runtime"
-            py = base / "python" / ("python.exe" if os.name == "nt" else "python")
-            return py.exists()
-        except Exception:
+            from ..environment import get_paths
+            paths = get_paths()
+            return paths.runtime_python_exists
+        except Exception as e:
+            log_error(f"检查运行时就绪状态失败: {e}")
             return False
 
     async def cancel_task(self, task_id: str) -> bool:
@@ -464,8 +470,8 @@ class TrainingManager:
                     return False
 
             # 删除任务目录
-            task_dir = self.tasks_dir / task_id
-            if task_dir.exists():
+            task_dir = self._find_task_dir(task_id)
+            if task_dir and task_dir.exists():
                 import shutil
                 shutil.rmtree(task_dir)
 
@@ -495,9 +501,14 @@ class TrainingManager:
 
         # 如果内存中没有，尝试从文件系统加载
         log_info(f"任务 {task_id} 不在内存中，尝试从文件系统加载")
-        task_dir = self.tasks_dir / task_id
-        task_file = task_dir / "task.json"
 
+        # 使用 _find_task_dir 查找任务目录
+        task_dir = self._find_task_dir(task_id)
+        if not task_dir:
+            log_error(f"任务目录不存在: {task_id}")
+            return None
+
+        task_file = task_dir / "task.json"
         if not task_file.exists():
             log_error(f"任务文件不存在: {task_file}")
             return None
@@ -584,9 +595,11 @@ class TrainingManager:
     def load_task_for_editing(self, task_id: str) -> Dict[str, Any]:
         """载入任务配置到UI界面进行编辑"""
         try:
-            task_dir = self.tasks_dir / task_id
-            task_file = task_dir / "task.json"
+            task_dir = self._find_task_dir(task_id)
+            if not task_dir:
+                raise TrainingNotFoundError(f"任务不存在: {task_id}")
 
+            task_file = task_dir / "task.json"
             if not task_file.exists():
                 raise TrainingNotFoundError(f"任务不存在: {task_id}")
 
@@ -692,7 +705,11 @@ class TrainingManager:
     def _scan_output_files(self, task: TrainingTask) -> None:
         """扫描输出文件"""
         try:
-            task_dir = self.tasks_dir / task.id
+            task_dir = self._find_task_dir(task.id)
+            if not task_dir:
+                log_error(f"任务目录不存在: {task.id}")
+                return
+
             output_dir = task_dir / "output"
 
             # 重置文件列表
@@ -741,7 +758,10 @@ class TrainingManager:
 
         if not rel_list:
             try:
-                task_dir = self.tasks_dir / task.id
+                task_dir = self._find_task_dir(task.id)
+                if not task_dir:
+                    return items
+
                 sample_dir = task_dir / 'output' / 'sample'
                 if sample_dir.exists():
                     for img_file in sample_dir.iterdir():
@@ -781,7 +801,10 @@ class TrainingManager:
 
         if not rel_list:
             try:
-                task_dir = self.tasks_dir / task.id
+                task_dir = self._find_task_dir(task.id)
+                if not task_dir:
+                    return items
+
                 output_dir = task_dir / 'output'
                 if output_dir.exists():
                     for model_file in output_dir.rglob('*.safetensors'):
@@ -832,10 +855,15 @@ class TrainingManager:
             success = trainer.run_training(task, log_callback=_log_callback)
 
             # 根据结果转换最终状态
-            final_state = TrainingState.COMPLETED if success else TrainingState.FAILED
+            # 检查是否被取消（通过trainer的_cancelled标志）
+            if hasattr(trainer, '_cancelled') and trainer._cancelled:
+                final_state = TrainingState.CANCELLED
+            else:
+                final_state = TrainingState.COMPLETED if success else TrainingState.FAILED
+
             await self._state_manager.transition_state(
                 task_id, final_state, f"trainer_end_{task_id}",
-                metadata={'success': success}
+                metadata={'success': success, 'cancelled': trainer._cancelled if hasattr(trainer, '_cancelled') else False}
             )
 
         except Exception as e:
@@ -908,7 +936,11 @@ class TrainingManager:
         try:
             from dataclasses import asdict
 
-            task_dir = self.tasks_dir / task.id
+            task_dir = self._find_task_dir(task.id)
+            if not task_dir:
+                log_error(f"保存任务失败：任务目录不存在: {task.id}")
+                return
+
             task_file = task_dir / "task.json"
 
             # 获取当前状态信息
@@ -965,6 +997,12 @@ class TrainingManager:
         try:
             for task_dir in self.tasks_dir.iterdir():
                 if not task_dir.is_dir():
+                    continue
+
+                # 解析目录名提取 task_id
+                task_id = self._parse_task_id_from_dirname(task_dir.name)
+                if not task_id:
+                    log_error(f"无法解析任务ID，跳过目录: {task_dir.name}")
                     continue
 
                 task_file = task_dir / "task.json"
@@ -1042,6 +1080,7 @@ class TrainingManager:
                 learning_rate=task_data.get("learning_rate", 0.0),
                 eta_seconds=task_data.get("eta_seconds"),
                 speed=task_data.get("speed"),
+                speed_unit=task_data.get("speed_unit", "it/s"),
                 created_at=datetime.fromisoformat(task_data["created_at"]) if task_data.get("created_at") else None,
                 started_at=datetime.fromisoformat(task_data["started_at"]) if task_data.get("started_at") else None,
                 completed_at=datetime.fromisoformat(task_data["completed_at"]) if task_data.get("completed_at") else None,
@@ -1064,7 +1103,10 @@ class TrainingManager:
     def _load_historical_logs(self, task: TrainingTask):
         """从train.log文件读取历史日志"""
         try:
-            task_dir = self.tasks_dir / task.id
+            task_dir = self._find_task_dir(task.id)
+            if not task_dir:
+                return
+
             log_file = task_dir / "train.log"
 
             if not log_file.exists():
@@ -1112,6 +1154,66 @@ class TrainingManager:
         except (ValueError, TypeError) as e:
             log_error(f"无效的状态值 '{state_value}': {e}, 使用默认状态 PENDING")
             return TrainingState.PENDING
+
+    def get_task_dir(self, task_id: str) -> Optional[Path]:
+        """获取任务目录路径（公共接口）
+        
+        支持新的目录命名格式: {task_id}--{safe_task_name}
+        
+        Args:
+            task_id: 任务ID（8位短ID）
+            
+        Returns:
+            任务目录的 Path 对象，如果未找到则返回 None
+        """
+        return self._find_task_dir(task_id)
+
+    def _find_task_dir(self, task_id: str) -> Optional[Path]:
+        """根据 task_id 查找任务目录（仅支持新格式）
+
+        新格式: {task_id}--{safe_task_name}
+        正则: ^{task_id}--
+
+        Args:
+            task_id: 8位短ID
+
+        Returns:
+            任务目录路径，未找到返回None
+        """
+        import re
+
+        # 扫描 tasks_dir 查找匹配 task_id 前缀的目录
+        pattern = re.compile(rf'^{re.escape(task_id)}--')
+
+        try:
+            for dir_path in self.tasks_dir.iterdir():
+                if dir_path.is_dir() and pattern.match(dir_path.name):
+                    return dir_path
+        except Exception as e:
+            log_error(f"扫描任务目录失败: {e}")
+
+        return None
+
+    def _parse_task_id_from_dirname(self, dirname: str) -> Optional[str]:
+        """从目录名解析 task_id（固定8位ID）
+
+        格式: {task_id}--{safe_task_name}
+        正则: ^([a-z0-9]{8})--
+
+        Args:
+            dirname: 目录名
+
+        Returns:
+            task_id（8位），解析失败返回None
+        """
+        import re
+
+        # 新格式: 8位短ID
+        match = re.match(r'^([a-z0-9]{8})--', dirname)
+        if match:
+            return match.group(1)
+
+        return None
 
     async def _ensure_state_exists(self, task: TrainingTask):
         """确保状态管理器中存在对应状态"""

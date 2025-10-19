@@ -151,8 +151,12 @@ export function setGroupedValue(
 
   if (isSharedField(fieldKey)) {
     // 共享字段：更新该组所有模型
+    // 从每个模型的字段中找到对应的 setting_path
     for (const model of allModelsInGroup) {
-      const modelPath = `model_paths.${model.typeName}.${fieldKey}`;
+      const field = model.allFields.find(f => f.key === fieldKey);
+      if (!field) continue;
+
+      const modelPath = field.setting_path;  // 使用 setting_path 而不是拼接 typeName
       const keys = modelPath.split('.');
       let current = newSettings;
 

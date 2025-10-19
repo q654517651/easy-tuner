@@ -42,6 +42,7 @@ export default function TasksList() {
         total: task.total_steps || 0,
         done: task.current_step || 0,
         throughput: task.speed || 0,
+        throughputUnit: task.speed_unit || 'it/s',
         eta: task.eta_seconds ? formatDuration(task.eta_seconds) : ''
       }));
 
@@ -145,8 +146,8 @@ export default function TasksList() {
             <div className="p-6 pb-0">
               <Alert
                 color="warning"
-                title="运行时环境未安装"
-                description="开始训练前需要先安装 Python 运行时和训练引擎"
+                title="训练环境未安装"
+                description="开始训练前需要先安装 Python 和训练引擎"
                 endContent={
                   <Button
                     size="sm"
@@ -154,7 +155,7 @@ export default function TasksList() {
                     color="warning"
                     onClick={() => setShowRuntimeModal(true)}
                   >
-                    安装运行时
+                    安装训练环境
                   </Button>
                 }
               />
@@ -171,8 +172,8 @@ export default function TasksList() {
           {!runtimeReady && (
             <Alert
               color="warning"
-              title="运行时环境未安装"
-              description="开始训练前需要先安装 Python 运行时和训练引擎"
+              title="训练环境未安装"
+              description="开始训练前需要先安装 Python 和训练引擎"
               endContent={
                 <Button
                   size="sm"
@@ -180,7 +181,7 @@ export default function TasksList() {
                   color="warning"
                   onClick={() => setShowRuntimeModal(true)}
                 >
-                  安装运行时
+                  安装训练环境
                 </Button>
               }
             />
@@ -219,7 +220,7 @@ export default function TasksList() {
           )}
         </div>
       )}
-      {/* 运行时安装对话框 */}
+      {/* 训练环境安装对话框 */}
       <RuntimeInstallModal
         isOpen={showRuntimeModal}
         onClose={() => setShowRuntimeModal(false)}
@@ -228,6 +229,3 @@ export default function TasksList() {
     </PageLayout>
   );
 }
-
-// 页面末尾挂载运行时安装对话框
-// 由于需在页面根组件中控制，直接放在默认导出组件返回内的末尾

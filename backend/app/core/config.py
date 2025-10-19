@@ -345,10 +345,22 @@ def get_config_path() -> str:
 
 def get_app_data_dir() -> str:
     """获取应用数据目录"""
-    # 使用backend目录存储配置文件
-    backend_dir = Path(__file__).parent.parent.parent
-    config_dir = backend_dir / "config"
-    config_dir.mkdir(exist_ok=True)
+    import sys
+
+    # 打包后使用用户数据目录（可写），开发环境使用项目配置目录
+    if getattr(sys, 'frozen', False):
+        # 打包环境：使用 AppData 目录（Windows）或 ~/.config（Linux/macOS）
+        if sys.platform == 'win32':
+            app_data = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming'))
+            config_dir = app_data / 'EasyTuner'
+        else:
+            config_dir = Path.home() / '.config' / 'EasyTuner'
+    else:
+        # 开发环境：使用backend目录存储配置文件
+        backend_dir = Path(__file__).parent.parent.parent
+        config_dir = backend_dir / "config"
+
+    config_dir.mkdir(parents=True, exist_ok=True)
     return str(config_dir)
 
 

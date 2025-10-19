@@ -74,7 +74,14 @@ class TrainingFileMonitor:
 
         try:
             with self._lock:
-                task_output_dir = Path(f"workspace/tasks/{task_id}/output")
+                # 获取任务目录（支持新的 task_id--name 格式）
+                from ..core.training.manager import get_training_manager
+                training_manager = get_training_manager()
+                task_dir = training_manager.get_task_dir(task_id)
+                if not task_dir:
+                    log_error(f"任务目录不存在，无法启动文件监控: {task_id}")
+                    return False
+                task_output_dir = task_dir / "output"
 
                 # 确保目录存在
                 task_output_dir.mkdir(parents=True, exist_ok=True)

@@ -19,8 +19,19 @@ class LogSink:
     def __init__(self, task_id: str, event_bus=None, workspace_root: Optional[str] = None):
         self.task_id = task_id
         self._event_bus = event_bus
-        root = Path(workspace_root or 'workspace')
-        self._log_path = root / 'tasks' / task_id / 'train.log'
+        
+        # 获取任务目录（支持新的 task_id--name 格式）
+        from ..core.training.manager import get_training_manager
+        training_manager = get_training_manager()
+        task_dir = training_manager.get_task_dir(task_id)
+        
+        if task_dir:
+            self._log_path = task_dir / 'train.log'
+        else:
+            # 回退到旧格式（兼容性，用于任务创建时目录尚未创建的情况）
+            root = Path(workspace_root or 'workspace')
+            self._log_path = root / 'tasks' / task_id / 'train.log'
+        
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = self._log_path.open('a', encoding='utf-8')
         self._last_line: Optional[str] = None

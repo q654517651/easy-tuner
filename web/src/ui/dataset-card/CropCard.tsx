@@ -25,12 +25,16 @@ export interface CropCardProps {
   };
   onCropChange?: (params: CropParams) => void;
   autosaveDelay?: number;
+  flushSignal?: number;
 }
 
 export interface CropParams {
   zoom: number;    // 当前 scale
   offsetX: number; // 当前 positionX - 居中positionX（见下）
   offsetY: number; // 当前 positionY - 居中positionY（见下）
+  // 绝对位移，等同于 TransformWrapper 的 positionX/positionY，便于后端直接使用
+  positionX?: number;
+  positionY?: number;
   cropRect: {
     x: number;      // [0,1] 相对原图
     y: number;
@@ -83,11 +87,11 @@ export function CropCard(props: CropCardProps) {
   const aspect = Math.max(1, targetWidth) / Math.max(1, targetHeight);
   const ready = img && box.w > 0 && box.h > 0;
 
-  // 计算 contain 所需最小缩放（短边顶边）
+  // 计算 cover 所需最小缩放（长边贴边）
   const minScale = useMemo(() => {
     if (!ready) return 1;
     const EPS = 0.01;
-    return Math.min(box.w / img!.w, box.h / img!.h) + EPS;
+    return Math.max(box.w / img!.w, box.h / img!.h) + EPS;
   }, [ready, box.w, box.h, img]);
 
   // 滑杆最大值：minScale 的 3 倍（即 300%）
@@ -121,7 +125,7 @@ export function CropCard(props: CropCardProps) {
 
   // 重新挂载 TransformWrapper 以应用新的 initialScale/initialPosition
   const wrapperKey = ready
-    ? `${url}:${box.w}x${box.h}:${img!.w}x${img!.h}:${initialScale.toFixed(4)}`
+    ? `${url}`
     : "loading";
 
   // 根据当前 transform 计算裁剪参数（归一化，基于原图像素）
@@ -166,14 +170,89 @@ export function CropCard(props: CropCardProps) {
     const offsetX = st.x - centeredPos.x;
     const offsetY = st.y - centeredPos.y;
     saveTimerRef.current = window.setTimeout(() => {
+      // 计算像素裁剪框（基于原图像素）
+      const px = img ? {
+        x: Math.round(cropRect.x * img.w),
+        y: Math.round(cropRect.y * img.h),
+        width: Math.round(cropRect.width * img.w),
+        height: Math.round(cropRect.height * img.h),
+      } : null;
       onCropChange({
         zoom: st.scale,
         offsetX,
         offsetY,
+        positionX: st.x,
+        positionY: st.y,
         cropRect,
-      });
+        // 附带像素裁剪框，便于后端直接使用
+        ...(px ? { pixelRect: px, imageSize: { width: img!.w, height: img!.h } } : {} as any),
+      } as any);
     }, props.autosaveDelay ?? 800);
   };
+
+  // 父组件要求立即回传最新transform（用于点击确认前flush）
+  useEffect(() => {
+    if (!ready || !onCropChange) return;
+    const inst = transformRef.current;
+    const s = inst ? getRZPPState(inst) : null;
+    if (!s) return;
+    const st = { scale: s.scale, x: s.positionX, y: s.positionY };
+    const cropRect = computeCropRect(st);
+    const offsetX = st.x - centeredPos.x;
+    const offsetY = st.y - centeredPos.y;
+    const px = img ? {
+      x: Math.round(cropRect.x * img.w),
+      y: Math.round(cropRect.y * img.h),
+      width: Math.round(cropRect.width * img.w),
+      height: Math.round(cropRect.height * img.h),
+    } : null;
+    onCropChange({
+      zoom: st.scale,
+      offsetX,
+      offsetY,
+      positionX: st.x,
+      positionY: st.y,
+      cropRect,
+      ...(px ? { pixelRect: px, imageSize: { width: img!.w, height: img!.h } } : {} as any),
+    } as any);
+  }, [props.flushSignal]);
+
+  // 目标尺寸变化时，若当前scale不足以cover，自动放大到minScale并保持居中
+  useEffect(() => {
+    if (!ready) return;
+    const inst = transformRef.current;
+    const s = inst ? getRZPPState(inst) : null;
+    if (!s) return;
+    if (s.scale + 1e-6 >= minScale) return;
+    const centerX = box.w / 2;
+    const centerY = box.h / 2;
+    const imgCenterX = (centerX - s.positionX) / s.scale;
+    const imgCenterY = (centerY - s.positionY) / s.scale;
+    const newScale = minScale;
+    const newX = centerX - imgCenterX * newScale;
+    const newY = centerY - imgCenterY * newScale;
+    inst!.setTransform(newX, newY, newScale, 0);
+    const st = { scale: newScale, x: newX, y: newY };
+    setTransform(st);
+    const cropRect = computeCropRect(st);
+    const offsetX = st.x - centeredPos.x;
+    const offsetY = st.y - centeredPos.y;
+    const px = img ? {
+      x: Math.round(cropRect.x * img.w),
+      y: Math.round(cropRect.y * img.h),
+      width: Math.round(cropRect.width * img.w),
+      height: Math.round(cropRect.height * img.h),
+    } : null;
+    onCropChange?.({
+      zoom: st.scale,
+      offsetX,
+      offsetY,
+      positionX: st.x,
+      positionY: st.y,
+      cropRect,
+      ...(px ? { pixelRect: px, imageSize: { width: img!.w, height: img!.h } } : {} as any),
+    } as any);
+  }, [targetWidth, targetHeight, minScale]);
 
   return (
     <div className="rounded-2xl bg-content1 dark:bg-white/5 shadow-sm overflow-hidden">

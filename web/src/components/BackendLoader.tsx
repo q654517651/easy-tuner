@@ -15,13 +15,8 @@ const HEALTH_CHECK_CONFIG = {
 
 export default function BackendLoader({ onReady }: BackendLoaderProps) {
   const [status, setStatus] = useState<"checking" | "ready" | "error">("checking");
-  const [debugInfo, setDebugInfo] = useState<string[]>([]);
   const [retryDelay, setRetryDelay] = useState(HEALTH_CHECK_CONFIG.initialRetryDelay);
   const [elapsedTime, setElapsedTime] = useState(0);
-
-  const addDebug = (msg: string) => {
-    setDebugInfo(prev => [...prev.slice(-5), `[${new Date().toLocaleTimeString()}] ${msg}`]);
-  };
 
   useEffect(() => {
     const startTime = Date.now();
@@ -32,7 +27,6 @@ export default function BackendLoader({ onReady }: BackendLoaderProps) {
 
       // 超时检查
       if (currentElapsed > HEALTH_CHECK_CONFIG.maxWaitTime) {
-        addDebug('Max wait time exceeded, giving up');
         setStatus("error");
         return;
       }
@@ -40,21 +34,15 @@ export default function BackendLoader({ onReady }: BackendLoaderProps) {
       try {
         const { isElectron: checkIsElectron } = await import('../utils/platform');
         const isElectron = checkIsElectron();
-        if (currentElapsed === 0) {
-          addDebug(`Environment: ${isElectron ? 'Electron' : 'Web'}`);
-        }
 
         if (isElectron) {
           // Electron 环境：通过 IPC 检查后端
           const result = await window.electronAPI.invoke("backend:checkHealth");
 
           if (result.ready) {
-            addDebug(`✓ Ready (port=${result.port}, status=${result.statusCode})`);
             setStatus("ready");
             setTimeout(onReady, 100);
             return;
-          } else {
-            addDebug(`✗ Failed (port=${result.port}, error=${result.error || result.statusCode || 'unknown'})`);
           }
         } else {
           // Web 开发模式：使用相对路径（通过 Vite 代理）
@@ -69,26 +57,20 @@ export default function BackendLoader({ onReady }: BackendLoaderProps) {
             clearTimeout(timeoutId);
 
             if (response.ok) {
-              addDebug(`✓ Ready (status=${response.status})`);
               setStatus("ready");
               setTimeout(onReady, 100);
               return;
-            } else {
-              addDebug(`✗ Failed (status=${response.status})`);
             }
           } catch (fetchError: any) {
             clearTimeout(timeoutId);
-            addDebug(`✗ Error (${fetchError?.name || 'Unknown'})`);
           }
         }
 
         // 后端未就绪，指数退避重试
-        addDebug(`⏳ Retry in ${retryDelay}ms (elapsed: ${Math.round(currentElapsed/1000)}s)`);
         setTimeout(checkBackend, retryDelay);
         setRetryDelay(prev => Math.min(prev * 2, HEALTH_CHECK_CONFIG.maxRetryDelay));
 
       } catch (error) {
-        addDebug(`Error: ${error instanceof Error ? error.message : String(error)}`);
         setTimeout(checkBackend, retryDelay);
         setRetryDelay(prev => Math.min(prev * 2, HEALTH_CHECK_CONFIG.maxRetryDelay));
       }
@@ -129,14 +111,6 @@ export default function BackendLoader({ onReady }: BackendLoaderProps) {
         <p className="text-default-500 mb-4">
           正在启动后端服务，请稍候... ({Math.round(elapsedTime/1000)}s / {HEALTH_CHECK_CONFIG.maxWaitTime/1000}s)
         </p>
-
-        {/* 调试信息 */}
-        <div className="mt-6 p-4 bg-default-100 rounded-lg text-left text-xs font-mono">
-          <div className="text-default-600 mb-2">Debug Info:</div>
-          {debugInfo.map((info, i) => (
-            <div key={i} className="text-default-500">{info}</div>
-          ))}
-        </div>
       </div>
     </div>
   );

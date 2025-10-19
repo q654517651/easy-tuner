@@ -3,6 +3,7 @@
 """
 
 from fastapi import APIRouter, HTTPException, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from dataclasses import asdict
@@ -58,8 +59,8 @@ def serialize_config() -> Dict[str, Any]:
 @router.get("/settings")
 async def get_settings():
     try:
-        # 获取当前 musubi 版本信息
-        version_info = check_submodule_status()
+        # 获取当前 musubi 版本信息（在线程池中执行，避免阻塞事件循环）
+        version_info = await run_in_threadpool(check_submodule_status)
 
         # 序列化配置
         config_data = serialize_config()
@@ -82,7 +83,8 @@ async def check_musubi_status():
         paths = get_paths()
         project_root = str(paths.project_root)
 
-        status_info = check_submodule_status(project_root)
+        # 在线程池中执行，避免阻塞事件循环
+        status_info = await run_in_threadpool(check_submodule_status, project_root)
 
         # 回写最新状态
         cfg = get_config()
@@ -117,7 +119,8 @@ async def get_musubi_releases_api(limit: int = 10, force_refresh: bool = False):
         paths = get_paths()
         project_root = str(paths.project_root)
 
-        releases = get_musubi_releases(project_root, min(limit, 20), force_refresh)
+        # 在线程池中执行，避免阻塞事件循环
+        releases = await run_in_threadpool(get_musubi_releases, project_root, min(limit, 20), force_refresh)
 
         return {
             "success": True,
@@ -138,7 +141,8 @@ async def clear_musubi_releases_cache():
         paths = get_paths()
         project_root = str(paths.project_root)
 
-        clear_musubi_cache(project_root)
+        # 在线程池中执行，避免阻塞事件循环
+        await run_in_threadpool(clear_musubi_cache, project_root)
         return Response(status_code=204)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"缓存清除失败: {str(e)}")
@@ -288,6 +292,17 @@ async def start_installation(request: StartInstallationRequest = StartInstallati
     返回 installation_id，前端通过 WebSocket 订阅实时进度
     """
     try:
+        # 检查 workspace 是否已设置
+        cfg = get_config()
+        workspace_root = cfg.storage.workspace_root
+
+        # 判断是否未设置（仍为默认相对路径）
+        if not workspace_root or workspace_root.strip() in ('.', './workspace', 'workspace', ''):
+            raise HTTPException(
+                status_code=400,
+                detail="工作区未设置，请先在「基础设置」中选择工作区目录"
+            )
+
         from ...services.installation_service import get_installation_service
 
         use_china_mirror = request.locale and request.locale.startswith('zh')
@@ -301,6 +316,8 @@ async def start_installation(request: StartInstallationRequest = StartInstallati
                 "installation_id": installation_id
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"启动安装失败: {str(e)}")
 
@@ -387,7 +404,9 @@ async def switch_musubi_version(request: Dict[str, Any]):
         log_info(f"切换 musubi-tuner 到版本: {version} ({commit_hash})")
 
         # 1. 先 fetch 确保有最新的 tags
-        fetch_result = subprocess.run(
+        # 在线程池中执行外部进程，避免阻塞事件循环
+        fetch_result = await run_in_threadpool(
+            subprocess.run,
             ["git", "fetch", "--tags"],
             cwd=str(musubi_dir),
             capture_output=True,
@@ -402,7 +421,8 @@ async def switch_musubi_version(request: Dict[str, Any]):
             )
 
         # 2. 切换到指定 commit
-        checkout_result = subprocess.run(
+        checkout_result = await run_in_threadpool(
+            subprocess.run,
             ["git", "checkout", commit_hash],
             cwd=str(musubi_dir),
             capture_output=True,
@@ -447,4 +467,3 @@ async def get_musubi_environment_status():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"检查环境状态失败: {str(e)}")
-

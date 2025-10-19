@@ -362,8 +362,8 @@ export const trainingApi = {
   }): Promise<any> {
     try {
       const url = `${getApiBaseUrl()}/training/preview-cli`;
-      console.log('[API] 预览 CLI 请求 URL:', url);
-      console.log('[API] 预览 CLI 请求数据:', data);
+      if (isDebugApi()) console.log('[API] 预览 CLI 请求 URL:', url);
+      if (isDebugApi()) console.log('[API] 预览 CLI 请求数据:', data);
 
       const response = await fetch(url, {
         method: 'POST',
@@ -373,7 +373,7 @@ export const trainingApi = {
         body: JSON.stringify(data),
       });
 
-      console.log('[API] 预览 CLI 响应状态:', response.status, response.statusText);
+      if (isDebugApi()) console.log('[API] 预览 CLI 响应状态:', response.status, response.statusText);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -381,7 +381,7 @@ export const trainingApi = {
         throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
       }
       const result = await response.json();
-      console.log('[API] 预览 CLI 结果:', result);
+      if (isDebugApi()) console.log('[API] 预览 CLI 结果:', result);
       return result.data;
     } catch (error) {
       console.error('[API] 生成CLI预览失败:', error);
@@ -652,6 +652,65 @@ export const labelingApi = {
   }
 };
 
+// 图片处理相关 API
+export const imagesApi = {
+  /**
+   * 批量裁剪（覆盖原图）。
+   * body 示例：
+   * {
+   *   target_width: 1024,
+   *   target_height: 1024,
+   *   images: [
+   *     { id: "1", source_path: "datasets/image_datasets/xxx/images/a.jpg", transform: { scale: 1.23, offset_x: 10, offset_y: 5 } }
+   *   ]
+   * }
+   */
+  async cropBatch(body: {
+    target_width: number;
+    target_height: number;
+    images: Array<{
+      id?: string;
+      source_path: string;
+      transform?: { scale: number; offset_x: number; offset_y: number } | null;
+      source_rect?: { x: number; y: number; width: number; height: number } | null;
+    }>;
+  }): Promise<{ success: boolean; data?: any; message?: string }>
+  {
+    const res = await fetch(`${getApiBaseUrl()}/images/crop/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  /**
+   * 删除控制图
+   */
+  async deleteControlImage(
+    datasetId: string,
+    originalFilename: string,
+    controlIndex: number
+  ): Promise<void> {
+    const url = new URL(`${getApiBaseUrl()}/datasets/${datasetId}/control-images`);
+    url.searchParams.append('original_filename', originalFilename);
+    url.searchParams.append('control_index', String(controlIndex));
+
+    const res = await fetch(url.toString(), {
+      method: 'DELETE',
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+  }
+};
+
 // GPU监控相关类型定义
 interface GPUMetrics {
   id: number;
@@ -719,7 +778,8 @@ export interface RuntimeStatus {
   runtime_path: string;
   python_present: boolean;
   engines_present: boolean;
-  reason: 'PYTHON_MISSING' | 'ENGINES_MISSING' | 'OK';
+  musubi_present: boolean;
+  reason: 'PYTHON_MISSING' | 'MUSUBI_MISSING' | 'ENGINES_MISSING' | 'OK';
 }
 
 // 系统就绪状态 API

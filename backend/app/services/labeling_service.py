@@ -393,12 +393,20 @@ class LabelingServiceAPI:
             raise ValidationError(f"文件未找到: {filename}")
 
         # 使用核心打标服务（按当前选中模型 & 默认 prompt）
+        selected_model = self._config.labeling.selected_model
+        log_info(f"[LabelingService] 使用模型 '{selected_model}' 对 {filename} 进行打标")
+
         try:
-            core_model_type = (self._config.labeling.selected_model or "").lower().strip().replace('-', '_').replace(' ', '_')
+            core_model_type = (selected_model or "").lower().strip().replace('-', '_').replace(' ', '_')
             from ..core.labeling.providers.registry import get_provider
             provider = get_provider(core_model_type)
+
             if provider is None:
-                raise ValidationError(f"model not available: {core_model_type}")
+                log_error(f"[LabelingService] Provider 不存在: {core_model_type}")
+                raise ValidationError(f"打标模型不可用: {selected_model}，请检查设置页配置")
+
+            # TODO: quick_config_check() 暂时禁用，未来用于测试服务连通性（不阻断调用）
+            # 当前直接尝试调用，由 Provider 内部处理配置错误
 
             r = await provider.generate_label(image_path, prompt=prompt or None)
 
@@ -408,21 +416,28 @@ class LabelingServiceAPI:
                 error_msg = "打标失败"
                 if r:
                     if r.detail:
-                        error_msg = f"打标失败: {r.detail}"
+                        error_msg = f"{r.detail}"
                     elif r.error_code:
-                        error_msg = f"打标失败 ({r.error_code})"
+                        error_msg = f"打标失败 (错误码: {r.error_code})"
+                log_error(f"[LabelingService] {error_msg} - 模型: {selected_model}, 文件: {filename}")
                 return {"filename": filename, "success": False, "error": error_msg}
 
             caption = r.text or ""
-            if not caption or caption.startswith("错误") or caption.startswith("AI调用失败"):
-                return {"filename": filename, "success": False, "error": caption or "打标失败：返回结果为空"}
+            if not caption:
+                log_error(f"[LabelingService] 返回结果为空 - 模型: {selected_model}, 文件: {filename}")
+                return {"filename": filename, "success": False, "error": "打标失败：返回结果为空"}
 
             # 打标成功，写入数据集标签
             self._dataset_service.update_label(dataset_id, filename, caption)
+            log_success(f"[LabelingService] 打标成功 - 模型: {selected_model}, 文件: {filename}, 标签长度: {len(caption)}")
             return {"filename": filename, "caption": caption, "success": True}
+
+        except ValidationError as e:
+            # ValidationError 直接向上抛出（前端能看到详细信息）
+            raise e
         except Exception as e:
-            log_error(f"单张打标失败: {dataset_id}/{filename}: {str(e)}")
-            raise APIException(500, f"单张打标失败: {str(e)}")
+            log_error(f"[LabelingService] 打标异常 - 模型: {selected_model}, 文件: {filename}, 错误: {str(e)}")
+            raise APIException(500, f"打标失败: {str(e)}")
     
     async def test_model_connection(self, model_id: str) -> Dict[str, Any]:
         """测试模型连接"""

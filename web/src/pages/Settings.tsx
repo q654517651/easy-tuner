@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Tabs, Tab, addToast, Button } from "@heroui/react";
+import { Tabs, Tab, addToast, Button, Spinner } from "@heroui/react";
 import HeaderBar from "../ui/HeaderBar";
 import GroupCard from "../ui/GroupCard";
 import ScrollArea from "../ui/ScrollArea";
@@ -129,7 +129,7 @@ function StatusBadge({ status }: { status: string }) {
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-8">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <Spinner size="lg" color="primary" />
     </div>
   );
 }
@@ -168,7 +168,11 @@ export default function SettingsPage() {
 
         const result = await response.json();
         if (result.success) {
-          // 静默保存，不显示提示
+          addToast({
+            title: "已保存",
+            color: "success",
+            timeout: 1500
+          });
         } else {
           throw new Error(result.message || "保存失败");
         }
@@ -440,15 +444,6 @@ export default function SettingsPage() {
 
       <ScrollArea className="flex-1 min-h-0">
         <div className="px-5 pb-5 space-y-6">
-        {/* 保存指示器 - 静默显示 */}
-        {saving && (
-          <div className="fixed bottom-4 right-4 rounded-xl bg-blue-50 border border-blue-200 p-3 shadow-lg z-50">
-            <div className="text-blue-800 flex items-center gap-2 text-sm">
-              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
-              保存中...
-            </div>
-          </div>
-        )}
 
 
         {/* 后端状态 */}
@@ -526,19 +521,21 @@ export default function SettingsPage() {
               <GroupCard
                 title="发布历史"
                 headerContent={
-                  <button
-                    onClick={() => loadMusubiReleases(true)}
+                  <Button
+                    size="sm"
+                    variant="bordered"
+                    onPress={() => loadMusubiReleases(true)}
+                    isLoading={releasesLoading}
                     disabled={releasesLoading}
-                    className="px-4 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {releasesLoading ? "检查中..." : "检查更新"}
-                  </button>
+                    检查更新
+                  </Button>
                 }
               >
                 <div className="md:col-span-2 h-full flex flex-col min-h-0">
                   {releasesLoading ? (
                     <div className="flex items-center justify-center py-4">
-                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                      <Spinner size="sm" color="primary" />
                       <span className="ml-2 text-sm text-gray-600 dark:text-gray-300">加载中...</span>
                     </div>
                   ) : releases.length === 0 ? (
@@ -613,34 +610,37 @@ export default function SettingsPage() {
                     )}
 
                     {/* 1. 先显示共享字段（vae, text_encoder 等） */}
-                    {sharedFields.map((field) => (
-                      <div key={field.key}>
-                        <HeroInput
-                          label={field.label}
-                          value={getGroupedValue(
-                            settings,
-                            group.groupKey,
-                            group.models[0].typeName,
-                            field.key,
-                            field.setting_path
-                          )}
-                          onChange={(value) => {
-                            const newSettings = setGroupedValue(
-                              settings,
-                              group.groupKey,
-                              group.models[0].typeName,
-                              field.key,
-                              field.setting_path,
-                              String(value),
-                              group.models
-                            );
-                            updateSettings(newSettings);
-                          }}
-                          placeholder={field.help || `请输入${field.label}`}
-                          help={field.help}
-                        />
-                      </div>
-                    ))}
+                    {sharedFields.map((field) => {
+                      const currentValue = getGroupedValue(
+                        settings,
+                        group.groupKey,
+                        group.models[0].typeName,
+                        field.key,
+                        field.setting_path
+                      );
+
+                      return (
+                        <div key={field.key}>
+                          <HeroInput
+                            label={field.label}
+                            value={currentValue}
+                            onChange={(value) => {
+                              const newSettings = setGroupedValue(
+                                settings,
+                                group.groupKey,
+                                group.models[0].typeName,
+                                field.key,
+                                field.setting_path,
+                                String(value),
+                                group.models
+                              );
+                              updateSettings(newSettings);
+                            }}
+                            placeholder={field.help || `请输入${field.label}`}
+                          />
+                        </div>
+                      );
+                    })}
 
                     {/* 独占字段小标题 */}
                     {ditFields.length > 0 && (

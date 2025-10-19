@@ -5,7 +5,7 @@ TFRecord 读取器 - 直接解析 events.out.tfevents.* 文件
 import struct
 from typing import Iterator, Optional
 from pathlib import Path
-from backend.app.utils.logger import log_info, log_warn, log_error
+from ....utils.logger import log_info, log_warn, log_error
 
 
 def crc32c(data: bytes) -> int:
@@ -105,7 +105,16 @@ def find_latest_event_file(logs_dir: Path) -> Optional[Path]:
 
 def find_event_file_for_task(workspace: Path, task_id: str) -> Optional[Path]:
     """为特定任务查找事件文件"""
-    logs_root = workspace / "tasks" / task_id / "logs"
+    # 获取任务目录（支持新的 task_id--name 格式）
+    from ..manager import get_training_manager
+    training_manager = get_training_manager()
+    task_dir = training_manager.get_task_dir(task_id)
+    
+    if not task_dir:
+        # 回退到旧格式（兼容性）
+        task_dir = workspace / "tasks" / task_id
+    
+    logs_root = task_dir / "logs"
 
     if not logs_root.exists():
         return None

@@ -21,7 +21,9 @@ class TBEventService:
 
     def __init__(self, workspace: Path = None):
         if workspace is None:
-            workspace = Path("workspace")
+            # 从环境管理器读取 workspace 路径
+            from ..core.environment import get_paths
+            workspace = get_paths().workspace_root
         self.workspace = Path(workspace)
 
     def parse_scalars(self, task_id: str, keep: Iterable[str] = ("loss", "learning_rate", "epoch")) -> Dict[str, List[ScalarPoint]]:

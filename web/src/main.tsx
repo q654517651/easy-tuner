@@ -5,7 +5,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { Providers } from "./providers";
 import { I18nProvider } from "./i18n/I18nProvider";
 import AppShell from "./shell/AppShell";
-import { Skeleton } from "@heroui/react";
+// import { Skeleton } from "@heroui/react";
 import "./index.css";
 
 // 懒加载页面组件

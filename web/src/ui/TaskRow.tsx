@@ -32,10 +32,10 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
   }
 
   // 行内实时指标（由 WS 周期刷新覆盖 task.json 值）
-  const [rowMetrics, setRowMetrics] = useState<{ step?: number; total?: number; speed?: number; etaSeconds?: number }>({});
+  const [rowMetrics, setRowMetrics] = useState<{ step?: number; total?: number; speed?: number; speedUnit?: string; etaSeconds?: number }>({});
   const [visible, setVisible] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pendingRef = useRef<{ step?: number; total?: number; speed?: number; etaSeconds?: number }>({});
+  const pendingRef = useRef<{ step?: number; total?: number; speed?: number; speedUnit?: string; etaSeconds?: number }>({});
   const flushTimerRef = useRef<number | null>(null);
   const isRunning = task.status === 'running';
   const pct = Math.min(
@@ -109,11 +109,12 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
     flushTimerRef.current = window.setInterval(() => {
       if (!pendingRef.current) return;
       const p = pendingRef.current;
-      if (p.step === undefined && p.total === undefined && p.speed === undefined && p.etaSeconds === undefined) return;
+      if (p.step === undefined && p.total === undefined && p.speed === undefined && p.speedUnit === undefined && p.etaSeconds === undefined) return;
       setRowMetrics(prev => ({
         step: p.step ?? prev.step,
         total: p.total ?? prev.total,
         speed: p.speed ?? prev.speed,
+        speedUnit: p.speedUnit ?? prev.speedUnit,
         etaSeconds: p.etaSeconds ?? prev.etaSeconds,
       }));
       // 清空已消费
@@ -141,11 +142,13 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
       if (typeof p.step === 'number') pendingRef.current.step = p.step;
       if (typeof p.total_steps === 'number') pendingRef.current.total = p.total_steps;
       if (typeof p.speed === 'number') pendingRef.current.speed = p.speed;
+      if (p.speed_unit) pendingRef.current.speedUnit = p.speed_unit;
       if (typeof p.eta_seconds === 'number') pendingRef.current.etaSeconds = p.eta_seconds;
     }
   });
 
   const displayThroughput = (rowMetrics.speed ?? task.throughput ?? 0).toFixed(2);
+  const displayThroughputUnit = rowMetrics.speedUnit ?? task.throughputUnit ?? 'it/s';
   const displayEta = (() => {
     const s = rowMetrics.etaSeconds ?? task.eta;
     if (typeof s === 'number') {
@@ -192,7 +195,7 @@ export default function TaskRow({ task, onTaskDeleted }: { task: TrainTask; onTa
           </div>
           <div className="mt-2 flex items-center justify-between text-xs opacity-60">
             <span>{(rowMetrics.step ?? task.done) || 0}/{(rowMetrics.total ?? task.total) || 0}</span>
-            <span>{displayThroughput} it/s · {displayEta || ""}</span>
+            <span>{displayThroughput} {displayThroughputUnit} · {displayEta || ""}</span>
           </div>
         </div>
       </div>

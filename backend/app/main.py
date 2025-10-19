@@ -12,6 +12,7 @@ import asyncio
 import logging
 
 from .api.v1 import datasets, labeling, training, system
+from .api.v1 import images as images_module
 from .api import internal as internal_module
 from .api.v1 import settings as settings_module
 from .api.websocket import websocket_router
@@ -24,7 +25,8 @@ from .core.websocket.manager import initialize_websocket_manager
 from .services.file_monitor_bridge import initialize_file_monitor_bridge
 from .core.training.manager import initialize_training_manager
 from .core.environment import init_environment
-from backend.app.utils.logger import log_info, log_warn, log_error
+from .utils.logger import log_info, log_warn, log_error
+from .utils.parent_monitor import start_parent_monitor, stop_parent_monitor
 
 # 获取配置
 settings = get_config()
@@ -69,17 +71,23 @@ async def lifespan(app: FastAPI):
     training_manager = initialize_training_manager(state_manager, event_bus, loop)
     log_info("新架构组件初始化完成")
 
+    # ② 启动父进程监控（自杀保险机制）
+    log_info("启动父进程监控...")
+    start_parent_monitor(loop)
+
     yield
 
-    # 关闭时清理（如果需要）
+    # 关闭时清理
     log_info("🛑 应用关闭中...")
+    stop_parent_monitor()
+    log_info("父进程监控已停止")
 
 
 # 创建FastAPI应用
 app = FastAPI(
     title="EasyTuner API",
     description="EasyTuner 数据集管理和AI训练平台 API",
-    version="2.0.0",
+    version="0.0.1",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -109,16 +117,42 @@ app.include_router(labeling.router, prefix="/api/v1", tags=["labeling"])
 app.include_router(training.router, prefix="/api/v1", tags=["training"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
 app.include_router(settings_module.router, prefix="/api/v1", tags=["settings"])
+app.include_router(images_module.router, prefix="/api/v1", tags=["images"])
 app.include_router(internal_module.router, tags=["internal"])  # /__internal__/shutdown
 
 # 注册WebSocket路由
 app.include_router(websocket_router, prefix="/ws")
 
-# 挂载静态文件服务 - 用于提供数据集图片（目录不存在时不崩溃）
-workspace_path = Path(settings.storage.workspace_root)
-workspace_static = StaticFiles(directory=str(workspace_path), check_dir=False)
-app.state.workspace_static = workspace_static
-app.mount("/workspace", workspace_static, name="workspace")
+# 动态静态文件路由 - 支持运行时切换工作区路径
+@app.get("/workspace/{path:path}")
+async def serve_workspace_file(path: str):
+    """
+    动态静态文件服务端点
+
+    每次请求都从配置读取 workspace_root，每次请求都生效
+    """
+    from fastapi.responses import FileResponse
+
+    cfg = get_config()
+    workspace_root = Path(cfg.storage.workspace_root).resolve()
+    file_path = (workspace_root / path.lstrip("/")).resolve()
+
+    # 安全：禁止越界
+    if not str(file_path).startswith(str(workspace_root)):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=403, detail="Not a file")
+
+    # 直接返回文件（FileResponse 自带 Content-Length/Last-Modified）
+    return FileResponse(
+        path=file_path,
+        # 简单缓存头
+        headers={"Cache-Control": "no-cache"}
+    )
 
 @app.get("/")
 async def root():
@@ -144,3 +178,4 @@ async def readyz():
         return {"status": "ok", "phase": "ready", "ready": True}
     except Exception as e:
         return {"status": "error", "phase": "initializing", "ready": False, "error": str(e)}
+

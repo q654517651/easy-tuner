@@ -277,9 +277,20 @@ async def send_historical_logs(client_id: str, task_id: str, request: dict, webs
         # 优先从文件读取（运行中也能获取到最新行）
         from pathlib import Path
         from ..core.config import get_config
+        from ..core.training.manager import get_training_manager
 
         cfg = get_config()
-        log_file = Path(cfg.storage.workspace_root) / 'tasks' / task_id / 'train.log'
+        # 获取任务目录（支持新的 task_id--name 格式）
+        training_manager = get_training_manager()
+        task_dir = training_manager.get_task_dir(task_id)
+        if not task_dir:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"任务目录不存在: {task_id}"
+            })
+            await websocket.close()
+            return
+        log_file = task_dir / 'train.log'
 
         logs_all = []
         total = 0
@@ -428,19 +439,20 @@ async def installation_websocket(websocket: WebSocket, installation_id: str):
         installation_service = get_installation_service()
         installation = installation_service.get_installation(installation_id)
 
-        if installation and installation.logs:
-            # 发送历史日志
-            for log_line in installation.logs:
-                log_msg = {
-                    'version': 1,
-                    'type': 'log',
-                    'installation_id': installation_id,
-                    'timestamp': asyncio.get_event_loop().time(),
-                    'payload': {'line': log_line}
-                }
-                await websocket.send_text(json.dumps(log_msg, ensure_ascii=False))
+        if installation:
+            # 回放历史日志（如有）
+            if installation.logs:
+                for log_line in installation.logs:
+                    log_msg = {
+                        'version': 1,
+                        'type': 'log',
+                        'installation_id': installation_id,
+                        'timestamp': asyncio.get_event_loop().time(),
+                        'payload': {'line': log_line}
+                    }
+                    await websocket.send_text(json.dumps(log_msg, ensure_ascii=False))
 
-            # 发送当前状态
+            # 总是回放当前状态，保证前端能够看到状态推进
             state_msg = {
                 'version': 1,
                 'type': 'state',

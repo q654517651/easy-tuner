@@ -19,7 +19,12 @@ class FileUtils:
         - 统一将反斜杠替换为正斜杠，并去掉前导斜杠
         - 仅允许访问 task 根目录下的文件
         """
-        task_root = Path("workspace") / "tasks" / task_id
+        # 获取任务目录（支持新的 task_id--name 格式）
+        from ..core.training.manager import get_training_manager
+        training_manager = get_training_manager()
+        task_root = training_manager.get_task_dir(task_id)
+        if not task_root:
+            raise HTTPException(status_code=404, detail=f"任务目录不存在: {task_id}")
         safe_rel = (subpath or "").replace("\\", "/").lstrip("/")
 
         try:

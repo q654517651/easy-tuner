@@ -105,7 +105,10 @@ function SortableTagChip({
 
   const handleSave = () => {
     const next = editValue.trim();
-    if (next && next !== label) onEdit(next);
+    // 如果内容改变（包括从空变为非空，或从非空变为空），调用 onEdit
+    if (next !== label) {
+      onEdit(next);
+    }
     onRequestClose();
     setEditValue(label);
   };
@@ -321,8 +324,18 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
 
   // 编辑标签
   const editTag = (index: number, newTag: string) => {
-    if (!tags.includes(newTag)) {
-      updateTags(tags.map((tag, i) => i === index ? newTag : tag));
+    const trimmed = newTag.trim();
+    // 如果新标签为空，删除该标签
+    if (!trimmed) {
+      removeTag(index);
+      return;
+    }
+    // 如果新标签不重复，更新
+    if (!tags.includes(trimmed)) {
+      updateTags(tags.map((tag, i) => i === index ? trimmed : tag));
+    } else if (tags[index] === '') {
+      // 如果原标签是空的，且新标签重复，也删除
+      removeTag(index);
     }
   };
 
@@ -457,7 +470,12 @@ export default function ImageTagEditor({image, onTagsChange, allTags = []}: Imag
             </label>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => {/* TODO: 添加标签逻辑 */}}
+                onClick={() => {
+                  // 添加空标签并立即进入编辑模式
+                  const newTags = [...tags, ''];
+                  setTags(newTags);
+                  setEditingIndex(newTags.length - 1);
+                }}
                 className="text-xs text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
               >
                 添加标签

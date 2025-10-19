@@ -191,7 +191,7 @@ export default function UITest() {
               filename="sample-image.jpg"
               caption="这是一张示例图片的标注文本"
               selected={false}
-              onSelect={(selected) => console.log("Image selected:", selected)}
+              onSelect={(selected) => { if (import.meta.env.DEV) console.log("Image selected:", selected); }}
               onDelete={() => alert("删除图片卡片")}
               onCaptionSave={(caption) => console.log("保存标注:", caption)}
               onAutoLabel={() => alert("自动打标")}
@@ -204,7 +204,7 @@ export default function UITest() {
               filename="sample-video.mp4"
               caption="这是一个示例视频的标注文本"
               selected={false}
-              onSelect={(selected) => console.log("Video selected:", selected)}
+              onSelect={(selected) => { if (import.meta.env.DEV) console.log("Video selected:", selected); }}
               onDelete={() => alert("删除视频卡片")}
               onCaptionSave={(caption) => console.log("保存标注:", caption)}
             />
@@ -217,7 +217,7 @@ export default function UITest() {
               caption="需要上传控制图的示例"
               controlImages={[]}
               selected={false}
-              onSelect={(selected) => console.log("Upload needed selected:", selected)}
+              onSelect={(selected) => { if (import.meta.env.DEV) console.log("Upload needed selected:", selected); }}
               onDelete={() => alert("删除卡片")}
               onCaptionSave={(caption) => console.log("保存标注:", caption)}
               onUploadControl={(slotIndex) => alert(`上传控制图到位置 ${slotIndex}`)}
@@ -234,7 +234,7 @@ export default function UITest() {
                 { url: "https://picsum.photos/seed/control1/400/300", filename: "control1.jpg" }
               ]}
               selected={false}
-              onSelect={(selected) => console.log("Single control image selected:", selected)}
+              onSelect={(selected) => { if (import.meta.env.DEV) console.log("Single control image selected:", selected); }}
               onDelete={() => alert("删除单图控制卡片")}
               onCaptionSave={(caption) => console.log("保存标注:", caption)}
               onUploadControl={(slotIndex) => alert(`上传控制图到位置 ${slotIndex}`)}
@@ -253,7 +253,7 @@ export default function UITest() {
                 { url: "https://picsum.photos/seed/control3/400/300", filename: "control3.jpg" }
               ]}
               selected={false}
-              onSelect={(selected) => console.log("Multi control image selected:", selected)}
+              onSelect={(selected) => { if (import.meta.env.DEV) console.log("Multi control image selected:", selected); }}
               onDelete={() => alert("删除多图控制卡片")}
               onCaptionSave={(caption) => console.log("保存标注:", caption)}
               onUploadControl={(slotIndex) => alert(`上传控制图到位置 ${slotIndex}`)}
@@ -506,4 +506,3 @@ export default function UITest() {
     </div>
   );
 }
-

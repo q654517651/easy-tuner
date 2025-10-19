@@ -210,7 +210,7 @@ export default function DatasetsList() {
       <WorkspaceSelectModal
         isOpen={showWorkspaceModal}
         onClose={() => setShowWorkspaceModal(false)}
-        onSuccess={() => setShowCreateDialog(true)}
+        onSuccess={refreshDatasets}
       />
     </PageLayout>
   );

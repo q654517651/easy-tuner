@@ -27,13 +27,12 @@ from ..models import BaseTrainingConfig, TrainingTask, TrainingState, get_model,
 
 
 class MusubiTrainer:
-    """统一的Musubi-Tuner训练器"""
-    _PYTHON_EXE_REL = Path("runtime/python/python.exe")
-    _MUSUBI_DIR_REL = Path("runtime/engines/musubi-tuner")
+    """统一的Musubi-Tuner训练器（支持 workspace-based runtime）"""
     _ACCELERATE_MODULE = "accelerate.commands.launch"
 
     def __init__(self, task_id: str, event_bus=None):
         from ...environment import get_paths
+        import sys
 
         self.config = get_config()
         self._paths = get_paths()  # 缓存环境路径
@@ -45,9 +44,40 @@ class MusubiTrainer:
         self._id = uuid.uuid4().hex
         self._network_retry = NetworkRetryHelper(max_retries=2, retry_delay=3)
 
+        # ✨ 新架构：使用环境管理器统一提供的 Python 路径（避免重复逻辑）
+        self._python_exe = self._paths.runtime_python
+        if not self._python_exe or not self._python_exe.exists():
+            raise TrainingError(
+                f"Runtime Python 不存在: {self._python_exe}，"
+                "请在设置页面重新安装 Runtime 环境"
+            )
+
+        self._musubi_dir = self._paths.musubi_dir  # workspace/runtime/engines/musubi-tuner
+        self._musubi_src = self._paths.musubi_src
+
+        if not self._musubi_dir.exists():
+            raise TrainingError(
+                f"Musubi 训练引擎不存在: {self._musubi_dir}，"
+                "请在设置页面重新安装 Runtime 环境"
+            )
+
         # 注册程序退出时的清理函数
         import atexit
         atexit.register(self._emergency_cleanup)
+
+    def _get_task_dir(self, task: TrainingTask) -> Path:
+        """获取任务目录（支持新的 task_id--name 格式）"""
+        from ..manager import get_training_manager
+        
+        training_manager = get_training_manager()
+        task_dir = training_manager.get_task_dir(task.id)
+        
+        if not task_dir:
+            # 回退到旧格式（兼容性）
+            log_error(f"无法找到任务目录，使用回退路径: {task.id}")
+            task_dir = Path(self.config.storage.workspace_root) / "tasks" / task.id
+        
+        return task_dir
 
     def _emit_event(self, event_type: str, data: Dict[str, Any]):
         """发送事件到事件总线"""
@@ -75,25 +105,28 @@ class MusubiTrainer:
     @property
     def _PROJECT_ROOT(self) -> Path:
         """
-        获取项目根目录（从环境管理器缓存）
-        仅用于设置 Popen 的 cwd，不会写入 CLI 参数。
+        获取工作目录根（从环境管理器缓存）
+        ✨ 新架构：workspace-based runtime，所有路径相对于 workspace_root
+        用于设置 Popen 的 cwd，不会写入 CLI 参数。
         """
-        return self._paths.project_root
+        return self._paths.workspace_root
 
-    # 仅返回"相对项目根"的 accelerate 命令
+    # ✨ 直接使用绝对路径的 accelerate 命令（不再相对化）
     def _get_accelerate_cmd(self) -> List[str]:
-        return [str(self._PYTHON_EXE_REL), "-m", self._ACCELERATE_MODULE]
+        """返回 accelerate 命令（使用绝对路径，跨平台稳定）"""
+        return [str(self._python_exe.resolve()), "-m", self._ACCELERATE_MODULE]
 
     # 从任务配置类的 ClassVar 取 3 个脚本（相对项目根）
     def _scripts_for_task(self, task) -> dict:
         """
         返回：
-          - train: 训练脚本的相对项目根 POSIX 路径（必填）
+          - train: 训练脚本的相对 workspace 根路径（必填）
           - cache_steps: [{name, script, args_template, enabled}]（从模型注册表读取）
         仅使用新的 ModelSpec.cache_steps；不再读取旧的 script_cache_te/latents。
         """
         model_spec = get_model(task.training_type)
-        base = Path("runtime/engines/musubi-tuner/src")  # 固定前缀（相对项目根）
+        # ✨ 使用相对于 workspace_root 的路径（因为 cwd 是 workspace_root）
+        base = self._musubi_src.relative_to(self._paths.workspace_root)
 
         def resolve(rel: str | None) -> str:
             if not rel:
@@ -192,8 +225,8 @@ class MusubiTrainer:
             training_dir = Path(self.config.storage.workspace_root) / "tasks" / "preview"
             cache_dir = training_dir / "cache"
         else:
-            # 实际训练：使用统一的任务目录
-            training_dir = Path(self.config.storage.workspace_root) / "tasks" / task.id
+            # 实际训练：使用统一的任务目录（支持新的 task_id--name 格式）
+            training_dir = self._get_task_dir(task)
             cache_dir = training_dir / "cache"
 
             # 确保目录存在（虽然应该已经由TrainingManager创建）
@@ -309,11 +342,23 @@ class MusubiTrainer:
         if not preview_mode:
             output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 固定参数（不会与动态参数冲突）
-        cmd = self._get_accelerate_cmd() + [
+        # ✨ 使用训练脚本的绝对路径（accelerate 支持直接运行脚本文件）
+        # 避免 --module 模式下 PYTHONPATH 继承问题
+        train_script_absolute = (self._PROJECT_ROOT / train_py_rel).resolve()
+        log_info(f"[训练脚本] 绝对路径: {train_script_absolute}")
+        log_info(f"[训练脚本] 是否存在: {train_script_absolute.exists()}")
+
+        if not train_script_absolute.exists():
+            raise TrainingError(f"训练脚本不存在: {train_script_absolute}")
+
+        # 固定参数（直接运行脚本文件，不使用 --module）
+        cmd = [
+            str(self._python_exe.resolve()),
+            "-m",
+            self._ACCELERATE_MODULE,
             ("--num_cpu_threads_per_process", "1"),
             ("--mixed_precision", "bf16"),
-            train_py_rel,
+            str(train_script_absolute),  # ✅ 直接使用脚本绝对路径
             ("--dataset_config", dataset_config_rel),
             ("--output_dir", output_dir_rel),
             ("--network_module", model_spec.network_module),
@@ -461,8 +506,8 @@ class MusubiTrainer:
         rel_to_root_from_script = os.path.relpath(self._PROJECT_ROOT, training_dir)
         rel_to_root_win = rel_to_root_from_script.replace("/", "\\")
 
-        # 3) PYTHONPATH 指向 musubi 源码目录（相对项目根）
-        musubi_src_rel = (self._MUSUBI_DIR_REL / "src").as_posix()
+        # 3) PYTHONPATH 指向 musubi 源码目录（使用绝对路径）
+        musubi_src_abs = str(self._musubi_src.resolve())
 
         # 4) 构建多行命令字符串和一行命令字符串
         flat_cmd = self._flatten_command(cmd)
@@ -511,7 +556,7 @@ class MusubiTrainer:
         bat_content = f"""@echo off
 cd /d "%~dp0{rel_to_root_win}"
 
-set "PYTHONPATH={musubi_src_rel};%PYTHONPATH%"
+set "PYTHONPATH={musubi_src_abs};%PYTHONPATH%"
 set "PYTHONIOENCODING=utf-8"
 
 {multi_line_cmd}
@@ -537,8 +582,8 @@ set "PYTHONIOENCODING=utf-8"
             log_info("模型未声明缓存步骤，跳过预处理")
             return True
 
-        # 工作路径与上下文 (使用统一目录结构)
-        training_dir = Path(self.config.storage.workspace_root) / "tasks" / task.id
+        # 工作路径与上下文 (使用统一目录结构，支持新的 task_id--name 格式)
+        training_dir = self._get_task_dir(task)
         cache_logs_dir = (training_dir / "cache").resolve()
         cache_logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -576,15 +621,45 @@ set "PYTHONIOENCODING=utf-8"
                 return False
 
             log_info(f"执行预处理步骤: {step.get('name')} -> {script_rel}")
+
+            # ✨ 使用 python -c 配合 runpy.run_module() 运行，手动注入 sys.path
+            # script_rel 格式：runtime/engines/musubi-tuner/src/musubi_tuner/qwen_image_cache_text_encoder_outputs.py
+            # 需要转换为模块路径：musubi_tuner.qwen_image_cache_text_encoder_outputs
+
+            # 1. 提取模块路径：从 .../src/ 之后的部分
+            script_rel_posix = script_rel.replace("\\", "/")
+            if "/src/" in script_rel_posix:
+                # 提取 src/ 之后的部分：musubi_tuner/qwen_image_cache_text_encoder_outputs.py
+                module_path_part = script_rel_posix.split("/src/", 1)[1]
+                # 移除 .py 后缀并转换为模块路径
+                module_name = module_path_part.replace("/", ".").replace(".py", "")
+                # 结果：musubi_tuner.qwen_image_cache_text_encoder_outputs
+            else:
+                raise TrainingError(f"无法解析模块路径: {script_rel}")
+
+            # 2. 获取 musubi-tuner/src 的绝对路径（用于 sys.path.insert）
+            musubi_src_path = str(self._musubi_src.resolve())
+
+            # 3. 构建 python -c 命令：手动注入 sys.path 并使用 runpy.run_module
+            # 格式: python.exe -c "import sys,runpy; sys.path.insert(0,r'路径'); runpy.run_module('模块名', run_name='__main__')" 参数...
+            python_oneliner = (
+                f"import sys,runpy; "
+                f"sys.path.insert(0,r'{musubi_src_path}'); "
+                f"runpy.run_module('{module_name}', run_name='__main__')"
+            )
+
             cache_cmd = [
-                str(self._PYTHON_EXE_REL).replace("\\", "/"),
-                str(script_rel).replace("\\", "/"),
+                str(self._python_exe.resolve()),
+                "-c",
+                python_oneliner,
                 *step_args
             ]
 
-            # 环境变量
+            log_info(f"[缓存] 使用 runpy 方式执行: {module_name}")
+            log_info(f"[缓存] Python路径注入: {musubi_src_path}")
+
+            # 4. 环境变量（保留基础设置，不再依赖 PYTHONPATH）
             env = os.environ.copy()
-            env['PYTHONPATH'] = (self._MUSUBI_DIR_REL / 'src').as_posix() + os.pathsep + env.get('PYTHONPATH', '')
             env['PYTHONIOENCODING'] = 'utf-8'
 
             try:
@@ -621,8 +696,8 @@ set "PYTHONIOENCODING=utf-8"
             # 验证配置
             self._validate_config(task.config)
 
-            # 训练目录
-            training_dir = Path(self.config.storage.workspace_root) / "tasks" / task.id
+            # 训练目录（支持新的 task_id--name 格式）
+            training_dir = self._get_task_dir(task)
 
             # 如果不强制重建，且文件已存在且有效，直接返回现有信息
             if not force and self.validate_artifacts(task):
@@ -656,7 +731,7 @@ set "PYTHONIOENCODING=utf-8"
     def validate_artifacts(self, task: TrainingTask) -> bool:
         """验证训练工件是否完整有效"""
         try:
-            training_dir = Path(self.config.storage.workspace_root) / "tasks" / task.id
+            training_dir = self._get_task_dir(task)
 
             # 检查必要文件是否存在
             required_files = [
@@ -724,8 +799,8 @@ set "PYTHONIOENCODING=utf-8"
             # 验证配置
             self._validate_config(task.config)
 
-            # 使用统一目录结构
-            training_dir = Path(self.config.storage.workspace_root) / "tasks" / task.id
+            # 使用统一目录结构（支持新的 task_id--name 格式）
+            training_dir = self._get_task_dir(task)
 
             # 确保工件存在（幂等操作）
             if not self.validate_artifacts(task):
@@ -822,7 +897,8 @@ set "PYTHONIOENCODING=utf-8"
 
             # 设置环境变量，确保能找到musubi_tuner模块
             env = os.environ.copy()
-            env['PYTHONPATH'] = (self._MUSUBI_DIR_REL / 'src').as_posix() + os.pathsep + env.get('PYTHONPATH', '')
+            # ✨ 使用绝对路径（workspace-based runtime）
+            env['PYTHONPATH'] = str(self._musubi_src.resolve()) + os.pathsep + env.get('PYTHONPATH', '')
             env['PYTHONIOENCODING'] = 'utf-8'
 
             # 使用网络重试逻辑启动训练（透传 log_sink）
@@ -891,6 +967,11 @@ set "PYTHONIOENCODING=utf-8"
                 current_env = env.copy()
                 if 'HF_ENDPOINT' in os.environ:
                     current_env['HF_ENDPOINT'] = os.environ['HF_ENDPOINT']
+
+                # 🔍 调试：打印 PYTHONPATH 确认是否正确设置
+                log_info(f"[环境变量] PYTHONPATH = {current_env.get('PYTHONPATH', '(未设置)')}")
+                log_info(f"[工作目录] cwd = {self._PROJECT_ROOT}")
+                log_info(f"[命令] {' '.join(cmd[:5])}...")  # 只打印前5个参数
 
                 # 创建进程
                 self._proc = subprocess.Popen(
@@ -1081,6 +1162,10 @@ set "PYTHONIOENCODING=utf-8"
                 else:
                     self._emit_log(success_msg, "success")
                 log_success(success_msg)
+                
+                # 确保最终日志能够发送到前端
+                import time
+                time.sleep(0.1)  # 短暂等待，确保日志事件被处理
 
                 if progress_callback:
                     progress_callback({"state": "completed"})
@@ -1097,6 +1182,11 @@ set "PYTHONIOENCODING=utf-8"
                 else:
                     self._emit_log(error_msg, "error")
                 log_error(error_msg)
+                
+                # 确保最终日志能够发送到前端
+                import time
+                time.sleep(0.1)  # 短暂等待，确保日志事件被处理
+                
                 if progress_callback:
                     progress_callback({
                         "state": "failed",
@@ -1167,13 +1257,15 @@ set "PYTHONIOENCODING=utf-8"
                 speed_its = re.search(r'([\d.]+)\s*it/s', line, re.IGNORECASE)
                 if speed_its:
                     progress_info['speed'] = float(speed_its.group(1))
+                    progress_info['speed_unit'] = 'it/s'
                 else:
                     speed_sit = re.search(r'([\d.]+)\s*s/it', line, re.IGNORECASE)
                     if speed_sit:
                         try:
                             v = float(speed_sit.group(1))
                             if v > 0:
-                                progress_info['speed'] = round(1.0 / v, 6)
+                                progress_info['speed'] = v  # 直接保存原值，不转换
+                                progress_info['speed_unit'] = 's/it'
                         except Exception:
                             pass
 
@@ -1184,10 +1276,17 @@ set "PYTHONIOENCODING=utf-8"
                     hours, minutes, seconds = map(int, eta_match.groups())
                     progress_info['eta_seconds'] = hours * 3600 + minutes * 60 + seconds
                 else:
+                    # 支持 <HH:MM:SS 格式
                     eta_angle = re.search(r'<\s*(\d{1,2}):(\d{2}):(\d{2})', line)
                     if eta_angle:
                         hours, minutes, seconds = map(int, eta_angle.groups())
                         progress_info['eta_seconds'] = hours * 3600 + minutes * 60 + seconds
+                    else:
+                        # 支持 <MM:SS 格式（无小时部分）
+                        eta_short = re.search(r'<\s*(\d{1,2}):(\d{2})\b', line)
+                        if eta_short:
+                            minutes, seconds = map(int, eta_short.groups())
+                            progress_info['eta_seconds'] = minutes * 60 + seconds
 
             # 推导进度
             if 'current_step' in progress_info and 'total_steps' in progress_info and progress_info['total_steps']:
@@ -1240,8 +1339,8 @@ set "PYTHONIOENCODING=utf-8"
 
                     log_info(f"发现 {len(children)} 个子进程")
 
-                    # 首先尝试优雅终止所有子进程
-                    for child in children:
+                    # 首先尝试优雅终止所有子进程（从最深的子进程开始）
+                    for child in reversed(children):  # 反向遍历，先杀最深的子进程
                         try:
                             log_info(f"终止子进程: PID={child.pid}, 名称={child.name()}")
                             child.terminate()
@@ -1252,7 +1351,7 @@ set "PYTHONIOENCODING=utf-8"
                     parent.terminate()
 
                     # 等待进程结束
-                    gone, alive = psutil.wait_procs(children + [parent], timeout=10)
+                    gone, alive = psutil.wait_procs(children + [parent], timeout=5)
 
                     # 强制杀死仍然存活的进程
                     if alive:
@@ -1264,8 +1363,8 @@ set "PYTHONIOENCODING=utf-8"
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
 
-                        # 再次等待
-                        psutil.wait_procs(alive, timeout=5)
+                        # 再次等待，缩短超时时间
+                        psutil.wait_procs(alive, timeout=2)
 
                 except psutil.NoSuchProcess:
                     log_info("主进程已不存在")
@@ -1355,17 +1454,16 @@ set "PYTHONIOENCODING=utf-8"
             pass
 
     def is_available(self) -> bool:
-        """检查Musubi-Tuner是否可用"""
+        """检查Musubi-Tuner是否可用（workspace-based runtime）"""
         try:
-            # 检查基本目录结构是否存在
-            musubi_dir = self._PROJECT_ROOT / self._MUSUBI_DIR_REL
-            if not musubi_dir.exists():
+            # ✨ 直接使用缓存的 musubi_dir（workspace/runtime/engines/musubi-tuner）
+            if not self._musubi_dir.exists():
                 return False
 
             # 检查关键脚本是否存在
             for model_spec in list_models():
                 script_rel_path = f"src/musubi_tuner/{model_spec.script_train}"
-                script_path = musubi_dir / script_rel_path
+                script_path = self._musubi_dir / script_rel_path
                 if not script_path.exists():
                     return False
 

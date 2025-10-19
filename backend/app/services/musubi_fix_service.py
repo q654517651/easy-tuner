@@ -50,74 +50,46 @@ class MusubiFixService:
         return "powershell"  # 最后的fallback
 
     async def fix_environment(self, use_china_mirror: bool = False) -> Tuple[bool, str]:
-        """
-        修复训练环境
-
-        Args:
-            use_china_mirror: 是否使用国内镜像源
-
-        Returns:
-            Tuple[bool, str]: (成功状态, 消息)
-        """
+        """修复训练环境：统一走后端 Python 安装脚本（venv 方案）"""
         try:
             log_info("开始修复训练环境...")
-
-            # 验证安装脚本是否存在
-            if not self.setup_script.exists():
-                error_msg = f"安装脚本不存在: {self.setup_script}"
-                log_error(error_msg)
-                return False, error_msg
-
-            # 运行安装脚本
-            log_info(f"运行安装脚本: {self.setup_script}")
-
-            # 检测PowerShell版本
-            ps_cmd = await self._detect_powershell()
-
-            # 构建PowerShell命令参数
-            ps_args = [ps_cmd, "-ExecutionPolicy", "Bypass", "-File", str(self.setup_script)]
-            if use_china_mirror:
-                ps_args.append("-UseChinaMirror")
-                log_info("使用国内镜像源")
-
-            # 使用asyncio运行PowerShell脚本 (修复编码参数问题)
-            process = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    *ps_args,
-                    cwd=str(self.runtime_dir),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                ),
-                timeout=300.0  # 5分钟超时
-            )
-
-            stdout_b, stderr_b = await process.communicate()
-            stdout = stdout_b.decode("utf-8", "ignore") if stdout_b else ""
-            stderr = stderr_b.decode("utf-8", "ignore") if stderr_b else ""
-
-            # 检查执行结果
-            if process.returncode == 0:
-                # 验证安装结果
-                python_exe = self.python_dir / "python.exe"
-                uv_exe = self.python_dir / "Scripts" / "uv.exe"
-
-                if python_exe.exists() and uv_exe.exists():
-                    log_success("训练环境修复成功")
-                    return True, "训练环境修复成功"
-                else:
-                    error_msg = "安装完成但Python环境不完整"
-                    log_error(error_msg)
-                    return False, f"{error_msg}\nStdout: {stdout}\nStderr: {stderr}"
-            else:
-                error_msg = f"安装脚本执行失败 (退出代码: {process.returncode})"
-                log_error(error_msg)
-                return False, f"{error_msg}\nStdout: {stdout}\nStderr: {stderr}"
-
+            return await self._fix_with_python_installer(use_china_mirror)
         except Exception as e:
-            error_msg = f"修复训练环境时发生错误: {str(e)}"
+            error_msg = f"修复训练环境时发生异常: {str(e)}"
             log_error(error_msg)
             return False, error_msg
 
+    async def _fix_with_python_installer(self, use_china_mirror: bool) -> Tuple[bool, str]:
+        from ..core.environment import get_paths
+        paths = get_paths()
+        install_script = paths.backend_root / "scripts" / "install_runtime.py"
+        if not install_script.exists():
+            return False, f"安装脚本不存在: {install_script}"
+        import sys
+        cmd = [
+            sys.executable,
+            str(install_script),
+            "--runtime-dir", str(self.runtime_dir),
+        ]
+        if use_china_mirror:
+            cmd.append("--use-china-mirror")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(paths.backend_root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout_b, _ = await process.communicate()
+        out = stdout_b.decode("utf-8", "ignore") if stdout_b else ""
+        if process.returncode == 0:
+            # ✨ 使用环境管理器统一提供的 Python 路径
+            from ..core.environment import get_paths
+            paths = get_paths()
+            py = paths.runtime_python
+            if py and py.exists():
+                return True, "训练环境修复成功"
+            return False, "安装完成但未检测到 Runtime Python\n" + out
+        return False, f"安装脚本执行失败（退出码 {process.returncode}）\n" + out
     async def fix_trainer_installation(self) -> Tuple[bool, str]:
         """
         修复训练器安装
@@ -307,3 +279,5 @@ class MusubiFixService:
 
 # 全局实例
 musubi_fix_service = MusubiFixService()
+
+

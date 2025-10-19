@@ -47,28 +47,10 @@ class InstallationService:
         # 获取路径
         from ..core.environment import get_paths
         paths = get_paths()
+        self._paths = paths
         self.runtime_dir = paths.runtime_dir
         self.python_dir = paths.runtime_dir / "python"
         self.setup_script = paths.setup_script
-
-    async def _detect_powershell(self) -> str:
-        """检测可用的PowerShell版本"""
-        for ps_cmd in ["pwsh", "powershell"]:
-            try:
-                process = await asyncio.wait_for(
-                    asyncio.create_subprocess_exec(
-                        ps_cmd, "-v",
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    ),
-                    timeout=5.0
-                )
-                await process.communicate()
-                if process.returncode == 0:
-                    return ps_cmd
-            except Exception:
-                continue
-        return "powershell"
 
     async def start_installation(self, use_china_mirror: bool = False) -> str:
         """
@@ -100,75 +82,109 @@ class InstallationService:
         return installation_id
 
     async def _run_installation(self, installation: Installation):
-        """运行安装进程"""
+        """运行安装进程（直接调用安装器，避免子进程）"""
         try:
-            # 验证安装脚本
-            if not self.setup_script.exists():
-                error_msg = f"安装脚本不存在: {self.setup_script}"
-                log_error(error_msg)
-                await self._emit_log(installation.id, error_msg)
-                await self._finalize_installation(installation, InstallationState.FAILED, error_msg)
-                return
-
-            # 诊断：检查事件循环类型
-            loop = asyncio.get_running_loop()
-            policy = asyncio.get_event_loop_policy()
-            await self._emit_log(installation.id,
-                f"[诊断] EventLoop={type(loop).__name__}, Policy={type(policy).__name__}")
-
-            # 检测 PowerShell
-            ps_cmd = await self._detect_powershell()
-            await self._emit_log(installation.id, f"使用 PowerShell: {ps_cmd}")
-
-            # 构建命令
-            ps_args = [ps_cmd, "-ExecutionPolicy", "Bypass", "-File", str(self.setup_script)]
-            if installation.use_china_mirror:
-                ps_args.append("-UseChinaMirror")
-                await self._emit_log(installation.id, "使用国内镜像源")
-
-            # 启动进程
             installation.state = InstallationState.RUNNING
             installation.started_at = datetime.now()
             await self._emit_state(installation.id, InstallationState.RUNNING)
-            await self._emit_log(installation.id, f"开始安装: {' '.join(ps_args)}")
 
-            process = await asyncio.create_subprocess_exec(
-                *ps_args,
-                cwd=str(self.runtime_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,  # 合并 stderr 到 stdout
+            if installation.use_china_mirror:
+                await self._emit_log(installation.id, "🌏 使用国内镜像源（清华 TUNA + Gitee）")
+
+            await self._emit_log(installation.id, "开始安装 Runtime 环境...")
+            await self._emit_log(installation.id, f"目标目录: {self.runtime_dir}")
+
+            # 导入安装器
+            try:
+                import sys
+                import importlib.util
+
+                # 查找 install_runtime.py 的完整路径
+                # 在打包环境中，scripts 目录位于 resources/backend/scripts（通过 extraResources 配置）
+                script_path = self._paths.backend_root / "scripts" / "install_runtime.py"
+
+                await self._emit_log(installation.id, f"正在加载安装脚本: {script_path}")
+
+                if not script_path.exists():
+                    # 提供调试信息
+                    await self._emit_log(installation.id, f"backend_root: {self._paths.backend_root}")
+                    await self._emit_log(installation.id, f"backend_root exists: {self._paths.backend_root.exists()}")
+                    if self._paths.backend_root.exists():
+                        try:
+                            scripts_dir = self._paths.backend_root / "scripts"
+                            await self._emit_log(installation.id, f"scripts_dir exists: {scripts_dir.exists()}")
+                            if scripts_dir.exists():
+                                files = list(scripts_dir.iterdir())
+                                await self._emit_log(installation.id, f"scripts_dir contents: {[f.name for f in files]}")
+                        except Exception as debug_e:
+                            await self._emit_log(installation.id, f"无法列出 scripts 目录: {debug_e}")
+                    raise ImportError(f"安装脚本不存在: {script_path}")
+
+                # 动态加载模块
+                spec = importlib.util.spec_from_file_location("install_runtime", script_path)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"无法加载安装脚本: {script_path}")
+
+                install_runtime_module = importlib.util.module_from_spec(spec)
+                sys.modules["install_runtime"] = install_runtime_module
+                spec.loader.exec_module(install_runtime_module)
+
+                run_install = install_runtime_module.run_install
+                set_output_callback = install_runtime_module.set_output_callback
+                set_cancel_flag = install_runtime_module.set_cancel_flag
+
+                await self._emit_log(installation.id, "✅ 安装脚本加载成功")
+
+                # 设置输出回调（捕获安装器的日志）
+                async def log_callback(line: str):
+                    await self._emit_log(installation.id, line)
+
+                # 创建同步回调包装器
+                loop = asyncio.get_event_loop()
+                def sync_callback(line: str):
+                    asyncio.run_coroutine_threadsafe(log_callback(line), loop)
+
+                set_output_callback(sync_callback)
+
+                # 保存取消函数引用
+                installation._cancel_installer = set_cancel_flag
+
+            except Exception as e:
+                error_msg = f"无法导入安装器: {e}"
+                log_error(error_msg)
+                await self._emit_log(installation.id, f"❌ {error_msg}")
+                await self._finalize_installation(installation, InstallationState.FAILED, error_msg)
+                return
+
+            # 在线程池中运行安装器（避免阻塞事件循环）
+            loop = asyncio.get_event_loop()
+            returncode = await loop.run_in_executor(
+                None,
+                run_install,
+                str(self.runtime_dir),
+                installation.use_china_mirror
             )
-            installation.process = process
 
-            # 逐行读取输出
-            if process.stdout:
-                async for line in process.stdout:
-                    decoded = line.decode('utf-8', errors='ignore').rstrip('\n\r')
-                    if decoded.strip():
-                        installation.logs.append(decoded)
-                        await self._emit_log(installation.id, decoded)
-
-            # 等待进程结束
-            returncode = await process.wait()
-
-            # 检查结果
+            # 检查取消状态
             if installation.state == InstallationState.CANCELLED:
                 await self._emit_log(installation.id, "安装已取消")
                 await self._finalize_installation(installation, InstallationState.CANCELLED, "用户取消安装")
                 return
 
+            # 检查安装结果
             if returncode == 0:
                 # 验证安装结果
-                python_exe = self.python_dir / "python.exe"
-                uv_exe = self.python_dir / "Scripts" / "uv.exe"
-
-                if python_exe.exists() and uv_exe.exists():
+                if self._validate_installation():
                     await self._emit_log(installation.id, "✅ 安装成功！")
                     await self._finalize_installation(installation, InstallationState.COMPLETED, None)
                 else:
-                    error_msg = "安装完成但 Python 环境不完整"
+                    error_msg = "安装脚本完成但环境验证失败"
                     await self._emit_log(installation.id, f"❌ {error_msg}")
                     await self._finalize_installation(installation, InstallationState.FAILED, error_msg)
+            elif returncode == 2:
+                # 退出码 2 表示已取消
+                await self._emit_log(installation.id, "⚠️ 安装已被用户取消")
+                await self._finalize_installation(installation, InstallationState.CANCELLED, "用户取消安装")
             else:
                 error_msg = f"安装脚本执行失败（退出代码: {returncode}）"
                 await self._emit_log(installation.id, f"❌ {error_msg}")
@@ -185,6 +201,31 @@ class InstallationService:
             await self._emit_log(installation.id, f"❌ {error_msg}")
             await self._emit_log(installation.id, f"详细错误: {error_detail}")
             await self._finalize_installation(installation, InstallationState.FAILED, error_msg)
+
+    def _validate_installation(self) -> bool:
+        """
+        验证安装结果（轻量级检测，复用环境管理器）
+
+        注意：安装完成后，环境管理器的缓存路径可能还是旧的，需要刷新
+        """
+        # ✨ 刷新环境管理器缓存（重要：安装后路径可能已变化）
+        from ..core.environment import get_env_manager
+        env_manager = get_env_manager()
+
+        # 重新初始化以刷新路径检测
+        env_manager.reset()
+        fresh_paths = env_manager.initialize(validate=False)
+
+        # 使用最新的路径状态
+        python_ok = fresh_paths.runtime_python_exists
+        musubi_ok = fresh_paths.musubi_exists
+
+        if not python_ok:
+            log_error(f"Python 环境验证失败: {fresh_paths.runtime_python} 不存在")
+        if not musubi_ok:
+            log_error(f"Musubi 验证失败: {fresh_paths.musubi_dir} 不存在或不是 Git 仓库")
+
+        return python_ok and musubi_ok
 
     async def cancel_installation(self, installation_id: str) -> Tuple[bool, str]:
         """
@@ -204,9 +245,15 @@ class InstallationService:
             return False, f"无法取消：当前状态为 {installation.state}"
 
         try:
+            # 设置取消标志（优先使用新的取消信号机制）
+            if hasattr(installation, '_cancel_installer') and installation._cancel_installer:
+                log_info(f"设置安装器取消标志: {installation_id}")
+                installation._cancel_installer()  # 调用 install_runtime.set_cancel_flag()
+
             installation.state = InstallationState.CANCELLED
             await self._emit_log(installation_id, "正在取消安装...")
 
+            # 旧的进程终止逻辑（保留作为兜底，但当前架构下 process 为 None）
             if installation.process:
                 process = installation.process
 
@@ -237,8 +284,10 @@ class InstallationService:
                         )
                     except Exception:
                         pass
+            else:
+                log_info(f"使用取消信号机制终止安装（非子进程模式）: {installation_id}")
 
-            await self._emit_log(installation_id, "安装已取消")
+            await self._emit_log(installation_id, "✅ 取消信号已发送，安装器将在下个检查点停止")
             await self._emit_state(installation_id, InstallationState.CANCELLED)
             return True, "安装已取消"
 
@@ -253,6 +302,16 @@ class InstallationService:
 
     async def _emit_log(self, installation_id: str, line: str):
         """发送日志事件"""
+        # 追加到内存缓冲，供 WS 新连接回放
+        inst = self._installations.get(installation_id)
+        if inst is not None:
+            try:
+                inst.logs.append(line)
+                if len(inst.logs) > 2000:
+                    inst.logs = inst.logs[-2000:]
+            except Exception:
+                pass
+
         await self._event_bus.emit('installation.log', {
             'installation_id': installation_id,
             'line': line,

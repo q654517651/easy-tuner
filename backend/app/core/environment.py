@@ -92,31 +92,33 @@ class EnvironmentManager:
         if not backend_root.exists():
             log_warning(f"[EnvironmentManager] backend_root 不存在: {backend_root}")
 
-        # 3) runtime_dir 固定为 resources/runtime
-        runtime_dir = (project_root / "runtime").resolve()
-        if not runtime_dir.exists():
-            log_warning(f"[EnvironmentManager] runtime_dir 不存在: {runtime_dir}")
-
-        # 4) workspace：入参优先，否则读配置
+        # 3) workspace：入参优先，否则读配置
         if workspace_root is None:
             from .config import get_config
             workspace_root = get_config().storage.workspace_root
         ws_path = Path(workspace_root).resolve()
 
-        # 5) runtime python（如有便携 Python）
+        # 4) ✨ 新架构: runtime_dir 指向 workspace/runtime（不再是 resources/runtime）
+        runtime_dir = (ws_path / "runtime").resolve()
+        if not runtime_dir.exists():
+            log_warning(f"[EnvironmentManager] runtime_dir 不存在: {runtime_dir}，将在首次安装时创建")
+
+        # 5) runtime python（跨平台检测）
         runtime_python = self._detect_runtime_python(runtime_dir)
 
-        # 6) 引擎路径
+        # 6) 引擎路径（从 workspace/runtime/engines 读取）
         engines_dir = runtime_dir / "engines"
         musubi_dir = engines_dir / "musubi-tuner"
         musubi_src = musubi_dir / "src"
+
+        # 7) 安装脚本路径（保留旧路径用于向后兼容，但实际使用 Python 脚本）
         setup_script = runtime_dir / "setup_portable_uv.ps1"
 
         self._paths = RuntimePaths(
             project_root=project_root,  # == resources
             backend_root=backend_root,  # == resources/backend
             workspace_root=ws_path,
-            runtime_dir=runtime_dir,  # == resources/runtime
+            runtime_dir=runtime_dir,  # ✨ workspace/runtime（新架构）
             runtime_python=runtime_python,
             runtime_python_exists=runtime_python is not None and runtime_python.exists(),
             musubi_dir=musubi_dir,
@@ -132,7 +134,8 @@ class EnvironmentManager:
         self._initialized = True
         log_info(f"[EnvironmentManager] 初始化完成: project_root={project_root} (应为 resources)")
         log_info(f"[EnvironmentManager] backend_root={backend_root}")
-        log_info(f"[EnvironmentManager] runtime_dir={runtime_dir}")
+        log_info(f"[EnvironmentManager] ✨ runtime_dir={runtime_dir} (workspace-based)")
+        log_info(f"[EnvironmentManager] workspace_root={ws_path}")
 
     def _detect_project_root(self) -> Path:
         """
@@ -167,12 +170,12 @@ class EnvironmentManager:
         # 3) 开发环境：从当前文件向上找同时包含 backend/ 与 runtime/ 的目录
         current = Path(__file__).resolve()
         for p in (current, *current.parents):
-            if (p / "backend" / "app").exists() and (p / "runtime").exists():
+            if (p / "backend" / "app").exists() and ((p / "runtime").exists() or (p / "workspace" / "runtime").exists()):
                 return p
 
         # 4) CWD 兜底（包含 runtime/）
         cwd = Path.cwd()
-        if (cwd / "runtime").exists():
+        if (cwd / "runtime").exists() or (cwd / "workspace" / "runtime").exists():
             return cwd
 
         raise RuntimeError(
@@ -193,13 +196,11 @@ class EnvironmentManager:
     def _detect_runtime_python(self, runtime_dir: Path) -> Optional[Path]:
         """检测 Runtime Python 可执行文件（平台兼容）"""
         if sys.platform == "win32":
-            # Windows
+            # Windows: 嵌入式 Python 的 python.exe 在根目录（不在 Scripts 子目录）
             python_exe = runtime_dir / "python" / "python.exe"
         else:
-            # Linux/macOS
+            # Linux/macOS: venv 的 python3 在 bin 子目录
             python_exe = runtime_dir / "python" / "bin" / "python3"
-            if not python_exe.exists():
-                python_exe = runtime_dir / "python" / "bin" / "python"
 
         return python_exe if python_exe.exists() else None
 

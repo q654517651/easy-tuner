@@ -120,6 +120,7 @@ export default function TaskDetail() {
         if (typeof p.lr === 'number') next.learning_rate = p.lr;
         if (typeof p.loss === 'number') next.loss = p.loss;
         if (typeof p.speed === 'number') next.speed = p.speed;
+        if (p.speed_unit) next.speed_unit = p.speed_unit;
         if (typeof p.eta_seconds === 'number') next.eta_seconds = p.eta_seconds;
         if (typeof p.progress === 'number') next.progress = p.progress;
         return next;
@@ -199,10 +200,15 @@ export default function TaskDetail() {
     }
   }, [selectedTab, task?.state, fetchGPUMetrics]);
 
+  // 稳定化 GPU 更新回调，避免触发重连
+  const handleGpuUpdate = useCallback((g: any[] | null) => {
+    setGpuMetrics(g ?? []);
+  }, []);
+
   // 训练中：启用 GPU WS（可见且在线）
   useGpuMetricsWS({
     enabled: selectedTab === 'progress' && task?.state === 'running' && document.visibilityState === 'visible' && navigator.onLine,
-    onUpdate: (g) => setGpuMetrics(g ?? []),
+    onUpdate: handleGpuUpdate,
   });
 
 
@@ -438,7 +444,7 @@ export default function TaskDetail() {
               <div className="flex items-center justify-between mb-2">
                 <div className="font-medium">训练进度</div>
                 <div className="text-sm opacity-60">
-                  {task.current_epoch || 0} / {task.total_steps || 0}
+                  {task.current_step || 0} / {task.total_steps || 0}
                 </div>
               </div>
               <div className="h-2 rounded-full bg-neutral-200 overflow-hidden">
@@ -468,7 +474,7 @@ export default function TaskDetail() {
                 <StatCard
                   iconPath={SpeedIcon}
                   label="训练速度"
-                  value={task.speed ? `${task.speed.toFixed(2)} it/s` : 'N/A'}
+                  value={task.speed ? `${task.speed.toFixed(2)} ${task.speed_unit || 'it/s'}` : 'N/A'}
                 />
                 <StatCard
                   iconPath={CountdownIcon}

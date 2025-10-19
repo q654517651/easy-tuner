@@ -101,7 +101,7 @@ export default function InstallationProgressModal({
   // 安装完成处理
   const handleInstallationCompleted = async () => {
     try {
-      // 验证运行时状态
+      // 验证训练环境状态
       const rtStatus = await readinessApi.getRuntimeStatus();
       const rtOk = rtStatus.data?.reason === 'OK';
 
@@ -109,7 +109,7 @@ export default function InstallationProgressModal({
         setRuntimeReady(true);
         addToast({
           title: '安装成功',
-          description: 'Python 运行时已成功安装',
+          description: 'Python 训练环境已成功安装',
           color: 'success',
           timeout: 3000
         });
@@ -118,16 +118,16 @@ export default function InstallationProgressModal({
       } else {
         addToast({
           title: '安装异常',
-          description: `安装脚本完成但运行时状态不正常: ${rtStatus.data?.reason}`,
+          description: `安装脚本完成但训练环境状态不正常: ${rtStatus.data?.reason}`,
           color: 'warning',
           timeout: 5000
         });
       }
     } catch (e) {
-      console.error('验证运行时状态失败:', e);
+      console.error('验证训练环境状态失败:', e);
       addToast({
         title: '验证失败',
-        description: '无法验证运行时状态，请手动检查',
+        description: '无法验证训练环境状态，请手动检查',
         color: 'warning',
         timeout: 5000
       });
@@ -257,7 +257,7 @@ export default function InstallationProgressModal({
       >
       <ModalContent>
         <ModalHeader className="flex items-center gap-2">
-          <span>安装 Python 运行时</span>
+          <span>安装 Python 训练环境</span>
           {state === 'running' && (
             <span className="text-sm font-normal text-primary">安装中...</span>
           )}
@@ -295,7 +295,7 @@ export default function InstallationProgressModal({
                 <div className="font-semibold mb-1">安装失败</div>
                 <div className="text-xs text-danger-700 dark:text-danger-300">
                   {logs.some(log => log.includes('不存在') || log.includes('not exist')) ? (
-                    <>安装脚本缺失，请检查 runtime/setup_portable_uv.ps1 是否存在</>
+                    <>安装脚本缺失，请检查 后端安装服务 是否存在</>
                   ) : logs.some(log => log.includes('权限') || log.includes('permission') || log.includes('denied')) ? (
                     <>权限不足，请以管理员身份运行或检查目录权限</>
                   ) : (

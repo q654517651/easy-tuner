@@ -9,7 +9,7 @@ TagTragger 是一个用于图像/视频数据集管理和 AI 模型训练的工�
 **技术栈：**
 - 后端：FastAPI + Python
 - 前端：React + TypeScript + Vite + HeroUI
-- 训练引擎：musubi-tuner (Git Submodule)
+- 训练引擎：musubi-tuner（Git Clone 到 workspace/runtime/engines）
 
 **主要功能：**
 1. 数据集管理（图像/视频/控制图）

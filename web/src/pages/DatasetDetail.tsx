@@ -5,9 +5,10 @@ import HeaderBar from "../ui/HeaderBar";
 import { DatasetCard } from "../ui/dataset-card";
 import { CropCard } from "../ui/dataset-card/CropCard";
 import { AppButton } from "../ui/primitives/Button";
+import { AppModal } from "../ui/primitives/Modal";
 import { convertToDatasetCardProps } from "../utils/dataset-card-adapter";
 import TagManager from "../components/TagManager";
-import { datasetApi, labelingApi, joinApiUrl, API_BASE_URL } from "../services/api";
+import { datasetApi, labelingApi, imagesApi, joinApiUrl, API_BASE_URL } from "../services/api";
 import EmptyState from "../ui/EmptyState";
 import EmptyImg from "../assets/img/EmptyDataset.png?inline";
 import { PageLayout } from "../layouts/PageLayout";
@@ -15,6 +16,7 @@ import { PageLayout } from "../layouts/PageLayout";
 interface MediaItem {
   id: string;
   filename: string;
+  file_path: string;
   url: string;
   caption: string;
   control_images?: {
@@ -52,7 +54,18 @@ export default function DatasetDetail() {
   // 裁剪相关状态
   const [cropWidth, setCropWidth] = useState(1024);
   const [cropHeight, setCropHeight] = useState(1024);
+  // 防抖后的目标尺寸（用于渲染与提交），避免输入过程中频繁刷新
+  const [debouncedCrop, setDebouncedCrop] = useState<{ w: number; h: number }>({ w: 1024, h: 1024 });
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedCrop({ w: Math.max(1, cropWidth), h: Math.max(1, cropHeight) });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [cropWidth, cropHeight]);
   const [cropping, setCropping] = useState(false);
+  const [showCropConfirm, setShowCropConfirm] = useState(false);
+  const [flushCounter, setFlushCounter] = useState(0);
+  const [cropTransforms, setCropTransforms] = useState<Record<string, { scale: number; positionX: number; positionY: number }>>({});
 
   // 当ID变化时立即重置状态（同步操作，确保骨架屏立即显示）
   useEffect(() => {
@@ -76,6 +89,7 @@ export default function DatasetDetail() {
           const mediaItems = (data.media_items ?? []).map((item: any) => ({
             id: item.id,
             filename: item.filename,
+            file_path: item.file_path,
             url: joinApiUrl(item.url),
             caption: item.caption ?? "",
             control_images: (item.control_images ?? []).map((ctrl: any) => ({
@@ -193,13 +207,27 @@ export default function DatasetDetail() {
         color: "success",
         timeout: 3000,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('单张打标失败:', error);
+
+      // 尝试解析后端返回的详细错误
+      let errorMessage = `无法为 ${item.filename} 生成标注`;
+      if (error?.message) {
+        try {
+          // 尝试从 JSON 格式的错误信息中提取 detail
+          const errorData = JSON.parse(error.message);
+          errorMessage = errorData.detail || errorData.error || error.message;
+        } catch {
+          // 如果不是 JSON，直接使用 error.message
+          errorMessage = error.message;
+        }
+      }
+
       addToast({
         title: "打标失败",
-        description: `无法为 ${item.filename} 生成标注`,
+        description: errorMessage,
         color: "danger",
-        timeout: 3000,
+        timeout: 5000,  // 延长显示时间，方便查看详细错误
       });
     } finally {
       // 完成打标 - 清除labeling状态
@@ -208,6 +236,114 @@ export default function DatasetDetail() {
         newSet.delete(rid);
         return newSet;
       });
+    }
+  };
+
+  // 执行裁剪：在确认后调用
+  const performCrop = async () => {
+    if (!items.length) {
+      setShowCropConfirm(false);
+      return;
+    }
+    try {
+      setShowCropConfirm(false);
+      setCropping(true);
+
+      // 1) 先强制子组件flush一次transform
+      setFlushCounter((x) => x + 1);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // 2) 组装images，确保每项都带有source_path（file_path缺失则从URL回退解析）
+      const getSourcePathFromUrl = (u: string) => {
+        try {
+          const urlObj = new URL(u);
+          const pathname = decodeURIComponent(urlObj.pathname || '');
+          const marker = '/workspace/';
+          const idx = pathname.indexOf(marker);
+          if (idx >= 0) return pathname.substring(idx + marker.length).replace(/^\/+/, '');
+          return pathname.replace(/^\/+/, '');
+        } catch {
+          // 相对路径兜底
+          return String(u || '').replace(/^https?:\/\/[^/]+\//, '').replace(/^\/+/, '');
+        }
+      };
+
+      const images = items.map((it) => {
+        const t: any = cropTransforms[it.id] || {};
+        const src = it.file_path && it.file_path.length > 0 ? it.file_path : getSourcePathFromUrl(it.url);
+        const hasPx = t.pixelRect && typeof t.pixelRect.x === 'number';
+        return hasPx ? (
+          {
+            id: it.id,
+            source_path: src,
+            transform: null,
+            source_rect: {
+              x: Math.max(0, Math.round(t.pixelRect.x)),
+              y: Math.max(0, Math.round(t.pixelRect.y)),
+              width: Math.max(1, Math.round(t.pixelRect.width)),
+              height: Math.max(1, Math.round(t.pixelRect.height)),
+            }
+          }
+        ) : (
+          {
+            id: it.id,
+            source_path: src,
+            transform: t ? { scale: t.scale, offset_x: t.positionX, offset_y: t.positionY } : null,
+          }
+        ) as any;
+      });
+
+      // 3) 请求裁剪
+      const resp = await imagesApi.cropBatch({
+        target_width: debouncedCrop.w,
+        target_height: debouncedCrop.h,
+        images,
+      });
+
+      let ok = 0, ko = 0;
+      const itemsRes = (resp as any)?.data?.items || [];
+      ok = itemsRes.filter((x: any) => x.success).length;
+      ko = itemsRes.length - ok;
+      addToast({
+        title: ko === 0 ? '裁剪完成' : '部分失败',
+        description: `成功 ${ok} 张，失败 ${ko} 张`,
+        color: ko === 0 ? 'success' : 'warning',
+        timeout: 3000,
+      });
+
+      // 4) 刷新数据集并强制刷新图片显示
+      if (id) {
+        try {
+          const data = await datasetApi.getDataset(id);
+          if (data) {
+            setDataset(data as any);
+            const v = Date.now();
+            const mediaItems = (data.media_items ?? []).map((item: any) => ({
+              id: item.id,
+              filename: item.filename,
+              file_path: item.file_path,
+              url: `${joinApiUrl(item.url)}?v=${v}`,
+              caption: item.caption ?? '',
+              control_images: (item.control_images ?? []).map((ctrl: any) => ({
+                ...ctrl,
+                url: `${joinApiUrl(ctrl.url)}?v=${v}`,
+              }))
+            }));
+            setItems(mediaItems);
+          }
+        } catch (e) {
+          console.error('刷新裁剪后数据集失败:', e);
+        }
+      }
+    } catch (e: any) {
+      console.error('裁剪失败:', e);
+      addToast({
+        title: '裁剪失败',
+        description: e?.message || String(e),
+        color: 'danger',
+      });
+    } finally {
+      setCropping(false);
     }
   };
 
@@ -302,6 +438,47 @@ export default function DatasetDetail() {
 
     // 触发文件选择器
     input.click();
+  };
+
+  // 处理控制图删除
+  const handleDeleteControl = async (originalFilename: string, controlIndex: number) => {
+    if (!id) return;
+
+    try {
+      // 调用删除API
+      await imagesApi.deleteControlImage(id, originalFilename, controlIndex);
+
+      // 删除成功，重新获取数据集详情以刷新数据
+      const updatedDataset = await datasetApi.getDataset(id);
+      if (updatedDataset) {
+        setDataset(updatedDataset);
+        // 更新媒体文件列表
+        const mediaItems = updatedDataset.media_items.map(item => ({
+          id: item.id,
+          filename: item.filename,
+          url: joinApiUrl(item.url),
+          caption: item.caption || "",
+          control_images: item.control_images
+        }));
+        setItems(mediaItems);
+      }
+
+      addToast({
+        title: "删除成功",
+        description: "控制图已删除",
+        color: "success",
+        timeout: 2000
+      });
+
+    } catch (error: any) {
+      console.error('删除控制图失败:', error);
+      addToast({
+        title: "删除失败",
+        description: error?.message || "删除控制图时发生错误",
+        color: "danger",
+        timeout: 3000
+      });
+    }
   };
 
   // 批量打标逻辑
@@ -406,12 +583,11 @@ export default function DatasetDetail() {
 
   // 检测是否为文件拖拽
   const isFileDrag = (e: React.DragEvent) => {
-    // 优先检查 dataTransfer.items
-    if (e.dataTransfer.items) {
-      return Array.from(e.dataTransfer.items).some(item => item.kind === 'file');
-    }
-    // 降级检查 dataTransfer.types
-    return e.dataTransfer.types.includes('Files');
+    const dt = e.dataTransfer as DataTransfer;
+    const types = Array.from(dt.types || []);
+    const hasFilesType = types.includes('Files');
+    // 只检查类型，不检查 files.length（在 dragOver/dragEnter 时为空，受浏览器安全限制）
+    return hasFilesType;
   };
 
   const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
@@ -527,7 +703,7 @@ export default function DatasetDetail() {
         >
           <Tab key="labeling" title="打标" />
           <Tab key="editing" title="标签管理" />
-          <Tab key="cropping" title="图片裁剪" />
+          {dataset?.type === "image" && <Tab key="cropping" title="图片裁剪" />}
         </Tabs>
 
         {selectedTab === "labeling" && dataset?.type === "image" && (
@@ -619,15 +795,7 @@ export default function DatasetDetail() {
               size="sm"
               isDisabled={cropping}
               isLoading={cropping}
-              onPress={() => {
-                // TODO: 批量裁剪逻辑
-                addToast({
-                  title: "裁剪功能开发中",
-                  description: "后端接口待完善",
-                  color: "warning",
-                  timeout: 2000,
-                });
-              }}
+              onPress={() => setShowCropConfirm(true)}
             >
               {cropping ? '正在裁剪...' : '确认裁剪'}
             </AppButton>
@@ -694,6 +862,7 @@ export default function DatasetDetail() {
                             const mediaItems = data.media_items.map(item => ({
                               id: item.id,
                               filename: item.filename,
+                              file_path: item.file_path,
                               url: joinApiUrl(item.url),
                               caption: item.caption || "",
                               control_images: item.control_images
@@ -725,7 +894,8 @@ export default function DatasetDetail() {
                               handleDelete,
                               handleAutoLabel,
                               handleSave,
-                              handleUploadControl
+                              handleUploadControl,
+                              handleDeleteControl
                             }
                           );
                           return (
@@ -750,10 +920,22 @@ export default function DatasetDetail() {
                             key={item.id}
                             url={item.url}
                             filename={item.filename}
-                            targetWidth={cropWidth}
-                            targetHeight={cropHeight}
+                            targetWidth={debouncedCrop.w}
+                            targetHeight={debouncedCrop.h}
+                            autosaveDelay={300}
+                            flushSignal={flushCounter}
                             onCropChange={(params) => {
-                              console.log(`[${item.filename}] 裁剪参数:`, params);
+                              const anyParams = params as any;
+                              setCropTransforms(prev => ({
+                                ...prev,
+                                [item.id]: {
+                                  scale: params.zoom,
+                                  positionX: anyParams.positionX ?? 0,
+                                  positionY: anyParams.positionY ?? 0,
+                                  pixelRect: anyParams.pixelRect ?? null,
+                                  imageSize: anyParams.imageSize ?? null,
+                                }
+                              }));
                             }}
                           />
                         ))}
@@ -772,6 +954,27 @@ export default function DatasetDetail() {
           <div className="text-white text-lg font-medium">将文件拖到这里进行添加</div>
         </div>
       )}
+
+      {/* 二次确认弹窗：覆盖原图不可撤销 */}
+      <AppModal
+        isOpen={showCropConfirm}
+        onClose={() => setShowCropConfirm(false)}
+        title="确认裁剪"
+        footer={
+          <div className="flex gap-2">
+            <AppButton kind="outline" onPress={() => setShowCropConfirm(false)}>取消</AppButton>
+            <AppButton kind="filled" color="primary" onPress={performCrop}>确认覆盖</AppButton>
+          </div>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <div>本操作将按当前视图覆盖原图，且不可撤销。</div>
+          <div>将处理 {items.length} 张图片，目标尺寸：{debouncedCrop.w}×{debouncedCrop.h}。</div>
+          <div>建议确认视图已停止操作（已稳定），以确保裁剪使用最新定位。</div>
+        </div>
+      </AppModal>
     </div>
   );
 }
+
+// 确认裁剪弹窗与执行逻辑（追加在组件内部末尾附近）

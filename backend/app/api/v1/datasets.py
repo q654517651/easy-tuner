@@ -2,7 +2,7 @@
 数据集API路由
 """
 
-from fastapi import APIRouter, Query, Path, HTTPException, Depends, UploadFile, File, Form, Body, Response
+from fastapi import APIRouter, Query, Path, HTTPException, Depends, UploadFile, File, Form, Body, Response, Request
 from typing import List, Optional
 import logging
 
@@ -62,6 +62,7 @@ async def get_dataset_types():
 
 @router.get("/datasets/{dataset_id}", response_model=DataResponse[DatasetDetail])
 async def get_dataset(
+    request: Request,
     dataset_id: str = Path(..., description="数据集ID"),
     media_page: int = Query(1, ge=1, description="媒体文件页码"),
     media_page_size: int = Query(50, ge=1, le=100, description="媒体文件每页数量"),
@@ -72,6 +73,7 @@ async def get_dataset(
         # 调用服务获取数据集详情（包含媒体文件分页）
         dataset = service.get_dataset(
             dataset_id=dataset_id,
+            request=request,
             media_page=media_page,
             media_page_size=media_page_size
         )
@@ -88,6 +90,7 @@ async def get_dataset(
 
 @router.post("/datasets", response_model=DataResponse[DatasetDetail], status_code=201)
 async def create_dataset(
+    http_request: Request,
     request: CreateDatasetRequest,
     service: DatasetService = Depends(get_dataset_service)
 ):
@@ -111,7 +114,7 @@ async def create_dataset(
             raise HTTPException(status_code=400, detail=message)
 
         # 创建成功后获取数据集详情
-        dataset = service.get_dataset(dataset_id)
+        dataset = service.get_dataset(dataset_id, http_request)
         return DataResponse(
             data=dataset,
             message=f"创建数据集成功: {dataset.name}"
@@ -179,6 +182,7 @@ async def delete_media_file(
 
 @router.put("/datasets/{dataset_id}/rename", response_model=DataResponse[DatasetDetail])
 async def rename_dataset(
+    http_request: Request,
     dataset_id: str = Path(..., description="数据集ID"),
     request: RenameDatasetRequest = Body(..., description="重命名请求"),
     service: DatasetService = Depends(get_dataset_service)
@@ -190,7 +194,7 @@ async def rename_dataset(
             raise HTTPException(status_code=400, detail=message)
 
         # 重命名成功后获取数据集详情
-        dataset = service.get_dataset(dataset_id)
+        dataset = service.get_dataset(dataset_id, http_request)
         if not dataset:
             raise HTTPException(status_code=404, detail="数据集不存在")
 
@@ -263,6 +267,7 @@ async def get_dataset_tag_stats(
 
 @router.post("/datasets/{dataset_id}/control-images", response_model=DataResponse[dict])
 async def upload_control_image(
+    http_request: Request,
     dataset_id: str = Path(..., description="数据集ID"),
     original_filename: str = Form(..., description="原图文件名"),
     control_index: int = Form(..., description="控制图索引 (0-2)"),
@@ -271,7 +276,7 @@ async def upload_control_image(
 ):
     """上传控制图"""
     try:
-        result = await service.upload_control_image(dataset_id, original_filename, control_index, control_file)
+        result = await service.upload_control_image(dataset_id, original_filename, control_index, control_file, http_request)
 
         if result["success"]:
             return DataResponse(
@@ -285,6 +290,24 @@ async def upload_control_image(
         raise HTTPException(status_code=e.status_code, detail=e.message)
     except Exception as e:
         import traceback
-        print(f"upload_control_image未处理异常: {e}")
-        traceback.print_exc()
+        logger.exception("upload_control_image 异常")
         raise HTTPException(status_code=500, detail=f"上传控制图失败: {str(e)}")
+
+
+@router.delete("/datasets/{dataset_id}/control-images", status_code=204)
+async def delete_control_image(
+    dataset_id: str = Path(..., description="数据集ID"),
+    original_filename: str = Query(..., description="原图文件名"),
+    control_index: int = Query(..., description="控制图索引 (0-2)"),
+    service: DatasetService = Depends(get_dataset_service)
+):
+    """删除控制图"""
+    try:
+        service.delete_control_image(dataset_id, original_filename, control_index)
+        return
+
+    except APIException as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        logger.exception("delete_control_image 异常")
+        raise HTTPException(status_code=500, detail=f"删除控制图失败: {str(e)}")

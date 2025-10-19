@@ -41,6 +41,7 @@ export function convertToDatasetCardProps(
     handleAutoLabel: (id: string) => void;
     handleSave: (id: string, caption: string) => void;
     handleUploadControl: (filename: string, index: number) => void;
+    handleDeleteControl: (filename: string, index: number) => void;
   }
 ): DatasetCardProps {
   const {
@@ -48,7 +49,8 @@ export function convertToDatasetCardProps(
     handleDelete,
     handleAutoLabel,
     handleSave,
-    handleUploadControl
+    handleUploadControl,
+    handleDeleteControl
   } = handlers;
 
   const baseProps = {
@@ -69,14 +71,16 @@ export function convertToDatasetCardProps(
       ...baseProps,
       mediaType: 'single_control_image' as const,
       controlImages: item.control_images || [],
-      onUploadControl: (index: 1) => handleUploadControl(item.filename, index - 1)
+      onUploadControl: (index: 1) => handleUploadControl(item.filename, index - 1),
+      onDeleteControl: (index: 1) => handleDeleteControl(item.filename, index - 1)
     };
   } else if (dataset?.type === 'multi_control_image') {
     return {
       ...baseProps,
       mediaType: 'multi_control_image' as const,
       controlImages: item.control_images || [],
-      onUploadControl: (index: 1 | 2 | 3) => handleUploadControl(item.filename, index - 1)
+      onUploadControl: (index: 1 | 2 | 3) => handleUploadControl(item.filename, index - 1),
+      onDeleteControl: (index: 1 | 2 | 3) => handleDeleteControl(item.filename, index - 1)
     };
   } else if (dataset?.type === 'video' || isVideoFile(item.filename)) {
     return {

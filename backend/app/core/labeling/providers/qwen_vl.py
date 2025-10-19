@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
 from .base import LabelingProvider, LabelResult, ImageInput, TextInput, ProviderMetadata
-from ..clients.qwen_vl_client import QwenVLClient
 from ...config import get_config
+from ....utils.logger import log_warning, log_error, log_info
 
 
 class QwenVLProvider(LabelingProvider):
-    """Qwen-VL Provider - 通过 QwenVLClient 调用子进程进行推理"""
+    """Qwen-VL Provider - 通过子进程调用 Python 脚本进行推理（合并原 qwen_vl_client 逻辑）"""
 
     name = "local_qwen_vl"
     capabilities: Sequence[str] = ("label_image",)  # 暂不支持翻译
 
     def __init__(self):
         self.config = get_config()
-        self._client = QwenVLClient()
 
     @classmethod
     def get_metadata(cls) -> ProviderMetadata:
@@ -25,20 +27,102 @@ class QwenVLProvider(LabelingProvider):
         from .registry import PROVIDER_METADATA
         return PROVIDER_METADATA["local_qwen_vl"]
 
+    def _get_config(self) -> dict:
+        """获取 Qwen-VL 配置"""
+        qwen_config = self.config.labeling.models.get('local_qwen_vl', {})
+        if not qwen_config:
+            raise ValueError("Qwen-VL 模型未配置，请在设置页配置权重文件路径")
+
+        weights_path = qwen_config.get('weights_path', '')
+        if not weights_path:
+            raise ValueError(
+                "Qwen-VL 配置不完整:\n"
+                "  - 权重文件路径: 未配置\n"
+                "请在设置页配置模型权重文件路径（.safetensors 格式）"
+            )
+
+        weights_file = Path(weights_path)
+        if not weights_file.exists():
+            raise FileNotFoundError(
+                f"Qwen-VL 权重文件不存在:\n"
+                f"  - 配置路径: {weights_path}\n"
+                f"  - 绝对路径: {weights_file.resolve()}\n"
+                "请检查路径是否正确"
+            )
+
+        return qwen_config
+
+    def _get_runtime_python(self) -> Path:
+        """获取 Runtime Python 可执行文件路径"""
+        from ....core.environment import get_paths
+
+        paths = get_paths()
+        runtime_python = paths.runtime_python
+
+        if runtime_python is None or not runtime_python.exists():
+            import sys as _sys
+            expected = paths.runtime_dir / ("python/" + ("Scripts/python.exe" if _sys.platform == "win32" else "bin/python3"))
+            raise FileNotFoundError(
+                f"Runtime Python 不存在:\n"
+                f"  - 期望路径: {expected}\n"
+                "请确保 runtime/python 虚拟环境已正确安装"
+            )
+
+        return runtime_python
+
+    def _get_script_path(self) -> Path:
+        """获取打标脚本路径（兼容开发和打包环境）"""
+        from ....core.environment import get_paths
+
+        paths = get_paths()
+        script_name = "caption_qwen25vl.py"
+
+        # 尝试多个可能的路径（按优先级）
+        candidate_paths = [
+            paths.backend_root / "scripts" / script_name,                      # 1. backend_root/scripts
+            paths.project_root / "backend" / "scripts" / script_name,         # 2. project_root/backend/scripts
+            Path(__file__).parent.parent.parent / "scripts" / script_name,    # 3. 相对于当前文件
+        ]
+
+        for script_path in candidate_paths:
+            if script_path.exists():
+                log_info(f"[QwenVL] 找到脚本: {script_path}")
+                return script_path
+
+        # 如果都不存在，抛出详细错误
+        error_msg = (
+            f"打标脚本不存在: {script_name}\n"
+            "尝试的路径:\n"
+        )
+        for i, p in enumerate(candidate_paths, 1):
+            error_msg += f"  {i}. {p.resolve()}\n"
+
+        raise FileNotFoundError(error_msg)
+
+    # TODO: 未来用于测试服务连通性（不阻断调用）
     async def test_connection(self) -> bool:
-        """检查配置是否完整"""
+        """测试连接（暂时禁用，标记为 TODO）"""
         try:
-            return self._client.quick_config_check()
-        except Exception:
+            _ = self._get_config()
+            _ = self._get_runtime_python()
+            _ = self._get_script_path()
+            return True
+        except Exception as e:
+            log_warning(f"[QwenVL] 配置检查失败: {str(e)}")
             return False
 
     async def generate_labels(
         self, images: Sequence[ImageInput], prompt: Optional[str] = None, **options: Any
     ) -> List[LabelResult]:
         """批量生成标注"""
-        # 先检查配置
-        if not self._client.quick_config_check():
-            error_msg = "Qwen-VL 服务未配置，请在设置中配置权重文件路径"
+        # 配置检查
+        try:
+            config = self._get_config()
+            runtime_python = self._get_runtime_python()
+            script_path = self._get_script_path()
+        except (ValueError, FileNotFoundError) as e:
+            error_msg = str(e)
+            log_error(f"[QwenVL] 配置错误: {error_msg}")
             return [
                 LabelResult(ok=False, error_code="CONFIG_ERROR", detail=error_msg, meta={"provider": self.name})
                 for _ in images
@@ -51,23 +135,34 @@ class QwenVLProvider(LabelingProvider):
                 image_paths.append(str(img))
             elif isinstance(img, bytes):
                 # bytes 不支持，返回错误
-                return [LabelResult(ok=False, error_code="UNSUPPORTED_INPUT", detail="Qwen-VL 暂不支持 bytes 输入", meta={"provider": self.name})]
+                return [LabelResult(
+                    ok=False,
+                    error_code="UNSUPPORTED_INPUT",
+                    detail="Qwen-VL 暂不支持 bytes 输入",
+                    meta={"provider": self.name}
+                )]
             else:
                 image_paths.append(str(img))
 
         # 获取 prompt
         use_prompt = prompt if prompt is not None else (self.config.labeling.default_prompt or "")
 
-        # 调用客户端（在执行器中运行，避免阻塞事件循环）
+        # 获取权重路径
+        weights_path = config.get('weights_path', '')
+
+        # 在执行器中运行子进程调用
         loop = asyncio.get_running_loop()
+
         try:
-            # 批量调用（使用 lambda 包装命名参数）
             result_dicts = await loop.run_in_executor(
                 None,
-                lambda: self._client.call_label_for_images_batch(
-                    prompt=use_prompt,
-                    image_paths=image_paths
-                )
+                self._call_subprocess,
+                runtime_python,
+                script_path,
+                weights_path,
+                image_paths,
+                use_prompt,
+                options.get('timeout', 600)  # 默认 10 分钟超时
             )
 
             # 将结果转换为 LabelResult
@@ -92,12 +187,123 @@ class QwenVLProvider(LabelingProvider):
         except Exception as e:
             # 整批失败
             error_msg = str(e)
+            log_error(f"[QwenVL] 批量推理失败: {error_msg}")
             return [
                 LabelResult(ok=False, error_code="CLIENT_ERROR", detail=error_msg, meta={"provider": self.name})
                 for _ in images
             ]
 
-    async def translate(self, text: TextInput, *, source_lang: Optional[str] = None, target_lang: str = "zh", **options: Any) -> LabelResult:
+    def _call_subprocess(
+        self,
+        runtime_python: Path,
+        script_path: Path,
+        weights_path: str,
+        image_paths: List[str],
+        prompt: str,
+        timeout: int
+    ) -> List[dict]:
+        """
+        调用子进程执行推理（同步方法，在 executor 中运行）
+
+        Returns:
+            [{"image": str, "caption": str, "success": bool, "error": str}, ...]
+        """
+        # 构建命令行参数
+        cmd = [
+            str(runtime_python),
+            str(script_path),
+            weights_path,
+            "--images", *[str(p) for p in image_paths],
+            "--prompt", prompt,
+        ]
+
+        # 设置环境变量
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
+        # 添加 musubi-tuner 源码路径到 PYTHONPATH（解决 ModuleNotFoundError）
+        try:
+            from ....core.environment import get_paths
+            paths = get_paths()
+            musubi_src = paths.musubi_src  # resources/runtime/engines/musubi-tuner/src
+
+            log_info(f"[QwenVL] musubi_src path: {musubi_src}")
+            log_info(f"[QwenVL] musubi_src exists: {musubi_src.exists()}")
+
+            if musubi_src.exists():
+                # 将 musubi_tuner 的父目录添加到 PYTHONPATH
+                pythonpath = str(musubi_src)
+                if "PYTHONPATH" in env:
+                    env["PYTHONPATH"] = f"{pythonpath}{os.pathsep}{env['PYTHONPATH']}"
+                else:
+                    env["PYTHONPATH"] = pythonpath
+                log_info(f"[QwenVL] Added PYTHONPATH: {pythonpath}")
+            else:
+                log_warning(f"[QwenVL] musubi-tuner src path does not exist: {musubi_src}")
+        except Exception as e:
+            import traceback
+            log_error(f"[QwenVL] Failed to set PYTHONPATH: {str(e)}\n{traceback.format_exc()}")
+
+        log_info(f"[QwenVL] 启动子进程: {' '.join(cmd[:3])} ...")
+
+        # 调用子进程
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                encoding='utf-8',
+                errors='replace',  # 替换无法解码的字节
+                env=env
+            )
+
+            if result.returncode != 0:
+                # 解析错误信息
+                try:
+                    error_data = json.loads(result.stderr)
+                    error_msg = error_data.get("error", result.stderr)
+                except:
+                    error_msg = result.stderr or "未知错误"
+                raise RuntimeError(f"Qwen-VL 推理失败（退出码 {result.returncode}）: {error_msg}")
+
+            # 解析 JSON 输出
+            if not result.stdout or not result.stdout.strip():
+                raise RuntimeError(
+                    f"Qwen-VL 脚本未返回任何输出（可能因编码错误或脚本异常）\n"
+                    f"Stderr: {result.stderr}"
+                )
+
+            # 倒序查找最后一条 JSON 行（处理多行输出）
+            stdout_lines = result.stdout.strip().splitlines()
+            json_line = None
+
+            for line in reversed(stdout_lines):
+                line_stripped = line.strip()
+                if line_stripped.startswith('[') or line_stripped.startswith('{'):
+                    json_line = line_stripped
+                    break
+
+            if json_line is None:
+                raise RuntimeError(
+                    f"未找到 JSON 输出\n"
+                    f"Output: {result.stdout}\n"
+                    f"Stderr: {result.stderr}"
+                )
+
+            results = json.loads(json_line)
+            log_info(f"[QwenVL] 推理完成，处理了 {len(results)} 张图片")
+            return results
+
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"Qwen-VL 推理超时（{timeout}秒）")
+        except Exception as e:
+            raise RuntimeError(f"调用 Qwen-VL 脚本失败: {str(e)}")
+
+    async def translate(
+        self, text: TextInput, *, source_lang: Optional[str] = None, target_lang: str = "zh", **options: Any
+    ) -> LabelResult:
         """暂不支持翻译"""
         return LabelResult(
             ok=False,
@@ -105,3 +311,5 @@ class QwenVLProvider(LabelingProvider):
             detail="Qwen-VL Provider 暂不支持翻译功能",
             meta={"provider": self.name}
         )
+
+

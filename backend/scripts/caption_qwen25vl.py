@@ -12,6 +12,20 @@ import warnings
 from pathlib import Path
 from contextlib import redirect_stdout
 
+# 添加 musubi-tuner 到 Python 路径（在导入前）
+# 脚本位置: backend/scripts/caption_qwen25vl.py
+# musubi-tuner 位置: runtime/engines/musubi-tuner/src
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parent.parent
+musubi_src = project_root / "runtime" / "engines" / "musubi-tuner" / "src"
+
+if musubi_src.exists():
+    sys.path.insert(0, str(musubi_src))
+    print(f"[DEBUG] Added to sys.path: {musubi_src}", file=sys.stderr)
+else:
+    print(f"[ERROR] musubi-tuner src not found: {musubi_src}", file=sys.stderr)
+    sys.exit(1)
+
 import torch
 from PIL import Image
 from transformers import AutoProcessor

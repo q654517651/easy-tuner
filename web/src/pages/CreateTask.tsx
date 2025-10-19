@@ -158,8 +158,28 @@ function checkCond(value: any, cond: EnableCond): boolean {
   return value === cond;
 }
 function enabledBy(meta: FieldMeta | undefined, values: Record<string, any>): boolean {
-  if (!meta?.enable_if?.length) return true;
-  return meta.enable_if.every(([k, c]) => checkCond(values[k], c));
+  const enable_if = meta?.enable_if;
+  if (!enable_if) return true;
+  
+  // 支持对象格式：{"scheduler__in": ["cosine", "linear"], "warmup_mode": "steps"}
+  if (typeof enable_if === 'object' && !Array.isArray(enable_if)) {
+    return Object.entries(enable_if).every(([key, cond]) => {
+      // 处理操作符后缀，如 scheduler__in
+      if (key.endsWith('__in')) {
+        const fieldName = key.slice(0, -4);  // 去掉 __in
+        return checkCond(values[fieldName], { in: cond });
+      }
+      // 直接相等比较
+      return checkCond(values[key], cond);
+    });
+  }
+  
+  // 兼容旧的数组格式（如果存在）
+  if (Array.isArray(enable_if)) {
+    return enable_if.every(([k, c]) => checkCond(values[k], c));
+  }
+  
+  return true;
 }
 function template(fmt: string, dict: Record<string, any>): string {
   return fmt.replace(/\{(\w+)\}/g, (_, k) => {
@@ -492,7 +512,7 @@ export default function CreateTask() {
     if (!model) return;
 
     // 检查必要的字段
-    const taskName = values.name || `${model.model_spec.title}_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}`;
+    const taskName = values.__task_name?.trim() || `${model.model_spec.title}_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}`;
     const datasetId = values.__dataset_id || datasets[0]?.id; // 使用相同的默认值逻辑
 
     if (!datasetId) {
@@ -506,11 +526,16 @@ export default function CreateTask() {
     }
 
     try {
+      // 过滤掉内部字段（以__开头的字段）
+      const cleanConfig = Object.fromEntries(
+        Object.entries(values).filter(([key]) => !key.startsWith('__'))
+      );
+
       const requestData = {
         name: taskName,
         dataset_id: datasetId,
         training_type: model.model_spec.type_name,
-        config: values
+        config: cleanConfig
       };
 
       const res = await fetch(`${API_BASE_URL}/training/tasks`, {
@@ -787,6 +812,13 @@ export default function CreateTask() {
                       localStorage.setItem("tt_last_type", String(v));
                       setTypeName(v);
                     }}
+                  />
+                  <HeroInput
+                    label="任务名称"
+                    value={values.__task_name || ""}
+                    placeholder={`${model?.model_spec?.title || "训练任务"}_${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}`}
+                    type="text"
+                    onChange={(v) => setValues((s) => ({ ...s, __task_name: v }))}
                   />
                   <HeroSelect
                     label="GPU 设置（仅展示）"

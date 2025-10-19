@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeTheme, shell, nativeImage, dialog} from "electron";
-import { spawn } from "node:child_process";
+import { spawn, exec } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs";
@@ -14,6 +14,22 @@ let backendProc: ReturnType<typeof spawn> | null = null;
 // 动态后端端口：优先环境变量，其次从后端 stdout 解析，默认 8000
 let BACKEND_PORT = Number(process.env.BACKEND_PORT || '8000');
 let win: BrowserWindow | null = null;
+
+// stopBackend 幂等控制
+let isStoppingBackend = false;
+
+// ---- 全局异常处理（确保任何未捕获的异常都能清理后端） ----
+process.on('uncaughtException', async (error) => {
+  console.error('[electron] Uncaught exception:', error);
+  await stopBackend(true, 1500);
+  app.exit(1);
+});
+
+process.on('unhandledRejection', async (reason) => {
+  console.error('[electron] Unhandled rejection:', reason);
+  await stopBackend(true, 1500);
+  app.exit(1);
+});
 
 // 健康检查配置（统一配置）
 const HEALTH_CHECK_CONFIG = {
@@ -123,6 +139,18 @@ async function createWindow() {
   });
 
   // 处理窗口关闭
+  win.on("close", async (event) => {
+    // 阻止默认关闭行为，先停止后端
+    if (backendProc) {
+      event.preventDefault();
+      console.log('[electron] Window closing, stopping backend...');
+      await stopBackend(true, 2000);
+      console.log('[electron] Backend stopped, closing window');
+      // 后端停止后，真正关闭窗口
+      win?.destroy();
+    }
+  });
+
   win.on("closed", () => {
     win = null;
   });
@@ -134,9 +162,20 @@ app.whenReady().then(async () => {
   await createWindow();
 
   // 仅在打包后启动后端 EXE；开发态默认不启动（可通过环境变量开启）
+  console.log(`[electron] isProd=${isProd}, app.isPackaged=${app.isPackaged}, ELECTRON_START_BACKEND=${process.env.ELECTRON_START_BACKEND}`);
   if (isProd || process.env.ELECTRON_START_BACKEND === '1') {
+    console.log('[electron] Starting backend...');
     // 异步启动后端，不阻塞窗口显示
-    startBackend();
+    startBackend().catch(err => {
+      console.error('[electron] startBackend failed:', err);
+      // 使用 dialog.showErrorBox（主进程 API）
+      dialog.showErrorBox(
+        'Backend Startup Failed',
+        `Failed to start backend:\n${err.message}\n\nCheck console for details.`
+      );
+    });
+  } else {
+    console.log('[electron] Backend not started (development mode)');
   }
 });
 
@@ -255,50 +294,57 @@ function copyDirSync(src: string, dest: string) {
 }
 
 /**
- * 探测可用端口（从 startPort 开始）
+ * 检查端口是否处于 LISTEN 状态（仅 Windows）
  */
-async function findAvailablePort(startPort: number): Promise<number> {
-  const checkPort = (port: number): Promise<boolean> => {
+async function isPortInUse(port: number): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    // 非 Windows 系统使用原有的 socket 探测方式
     return new Promise((resolve) => {
       const server = http.createServer();
-      server.once('error', () => resolve(false));
+      server.once('error', () => resolve(true)); // 端口被占用
       server.once('listening', () => {
         server.close();
-        resolve(true);
+        resolve(false); // 端口可用
       });
       server.listen(port, '127.0.0.1');
     });
-  };
+  }
 
+  // Windows 使用 netstat 精确检查 LISTEN 状态
+  return new Promise((resolve) => {
+    exec(`netstat -ano -p TCP | findstr ":${port} " | findstr "LISTENING"`, (err: any, stdout: string) => {
+      resolve(stdout.trim().length > 0);
+    });
+  });
+}
+
+/**
+ * 探测可用端口（从 startPort 开始）
+ */
+async function findAvailablePort(startPort: number): Promise<number> {
   for (let port = startPort; port < startPort + 10; port++) {
-    if (await checkPort(port)) {
+    const inUse = await isPortInUse(port);
+    if (!inUse) {
+      console.log(`[electron] Port ${port} is available`);
       return port;
+    } else {
+      console.log(`[electron] Port ${port} is in use, trying next...`);
     }
   }
   throw new Error(`No available port found from ${startPort} to ${startPort + 9}`);
 }
 
 /**
- * 等待端口释放
+ * 等待端口释放（使用 netstat 精确检查 LISTEN 状态）
  */
 async function waitPortRelease(port: number): Promise<void> {
   const { pollInterval, maxWaitTime } = PORT_RELEASE_CONFIG;
   const deadline = Date.now() + maxWaitTime;
 
   while (Date.now() < deadline) {
-    const isPortOpen = await new Promise<boolean>((resolve) => {
-      const req = http.get(`http://127.0.0.1:${port}/healthz`, (res) => {
-        res.resume(); // 消费响应体，避免 socket 泄漏
-        resolve(true);
-      });
-      req.on('error', () => resolve(false));
-      req.setTimeout(500, () => {
-        try { req.destroy(); } catch {}
-        resolve(false);
-      });
-    });
+    const inUse = await isPortInUse(port);
 
-    if (!isPortOpen) {
+    if (!inUse) {
       console.log(`[electron] Port ${port} released`);
       return;
     }
@@ -310,53 +356,119 @@ async function waitPortRelease(port: number): Promise<void> {
 }
 
 async function startBackend() {
+  console.log('[electron] ========================================');
+  console.log('[electron] startBackend() called');
+  console.log('[electron] ========================================');
+
   // 1. 探测可用端口
+  console.log('[electron] [1/5] Finding available port...');
   try {
     BACKEND_PORT = await findAvailablePort(8000);
-    console.log(`[electron] Using port: ${BACKEND_PORT}`);
+    console.log(`[electron]   ✓ Port: ${BACKEND_PORT}`);
   } catch (e) {
-    console.error('[electron] Failed to find available port:', e);
-    return;
+    const errMsg = `Failed to find available port: ${e}`;
+    console.error(`[electron]   ✗ ${errMsg}`);
+    throw new Error(errMsg);
   }
 
-  // 2. 打包后：准备工作目录
-  const exeDir = resourcesBackendDir();  // resources/backend
-  const resourcesDir = path.dirname(exeDir);  // resources
-  // workspace 由用户选择，不在此处创建
-
-  // 3. 启动后端进程（工作目录设为 resources/，通过环境变量传递配置）
+  // 2. 准备目录和路径
+  console.log('[electron] [2/5] Preparing paths...');
+  const exeDir = resourcesBackendDir();
+  const resourcesDir = path.dirname(exeDir);
   const exePath = path.join(exeDir, 'EasyTunerBackend.exe');
+
+  console.log(`[electron]   process.resourcesPath: ${process.resourcesPath}`);
+  console.log(`[electron]   exeDir: ${exeDir}`);
+  console.log(`[electron]   resourcesDir: ${resourcesDir}`);
+  console.log(`[electron]   exePath: ${exePath}`);
+
+  // 3. 检查 EXE 是否存在
+  console.log('[electron] [3/5] Checking backend executable...');
+  const exeExists = fs.existsSync(exePath);
+  console.log(`[electron]   exists: ${exeExists}`);
+
+  if (!exeExists) {
+    // 列出 backend 目录内容，帮助调试
+    try {
+      if (fs.existsSync(exeDir)) {
+        const files = fs.readdirSync(exeDir);
+        console.log(`[electron]   Files in ${exeDir}:`, files);
+      } else {
+        console.log(`[electron]   Directory does not exist: ${exeDir}`);
+      }
+    } catch (listErr) {
+      console.error(`[electron]   Failed to list directory:`, listErr);
+    }
+
+    const errMsg = `Backend executable not found: ${exePath}`;
+    console.error(`[electron]   ✗ ${errMsg}`);
+    throw new Error(errMsg);
+  }
+
+  // 4. Spawn 后端进程
+  console.log('[electron] [4/5] Spawning backend process...');
   try {
     backendProc = spawn(exePath, [], {
-      cwd: resourcesDir,  // ✅ 修改：工作目录设为 resources/
-      stdio: 'pipe',
+      cwd: resourcesDir,  // 工作目录设为 resources/
+      stdio: 'pipe',      // 捕获标准输入输出（调试用）
+      detached: false,    // 不创建独立进程组，确保父进程退出时子进程能被清理
+      windowsHide: true,  // Windows 下隐藏控制台窗口
+      windowsVerbatimArguments: true,  // Windows 命令行参数原样传递
       env: {
         ...process.env,
         BACKEND_PORT: String(BACKEND_PORT),
         TAGTRAGGER_ROOT: resourcesDir,  // 明确指定项目根
-        // 注意：workspace 路径会在后端首次启动时通过 API 设置，暂不在此处指定
+        ELECTRON_PPID: String(process.pid),  // 传递父进程 PID（用于后端自杀检测）
+        ELECTRON_START_TIME: String(Date.now()),  // 传递启动时间戳
       }
     });
 
-    backendProc.stdout?.on('data', d => {
-      const text = d.toString();
-      console.log('[backend]', text);
+    if (!backendProc.pid) {
+      throw new Error('Spawn succeeded but PID is undefined');
+    }
+
+    console.log(`[electron]   ✓ Spawned successfully`);
+    console.log(`[electron]   PID: ${backendProc.pid}`);
+    console.log(`[electron]   killed: ${backendProc.killed}`);
+
+    // 监听进程事件
+    backendProc.on('error', (err) => {
+      console.error('[electron] [backend] Process error event:', err);
+      console.error(`[electron]   error.code: ${(err as any).code}`);
+      console.error(`[electron]   error.message: ${err.message}`);
     });
-    backendProc.stderr?.on('data', d => console.error('[backend-err]', d.toString()));
-    backendProc.on('exit', code => {
-      console.log('[backend] exit', code);
+
+    backendProc.on('exit', (code, signal) => {
+      console.log(`[electron] [backend] Process exited: code=${code}, signal=${signal}`);
       backendProc = null;
     });
 
-    // 4. 等待后端就绪（指数退避重试）
-    await waitBackendReady();
-    console.log('[electron] Backend is ready!');
+    backendProc.stdout?.on('data', d => {
+      const text = d.toString().trim();
+      console.log(`[backend stdout] ${text}`);
+    });
 
-    // 5. 注入全局变量并通知前端后端已就绪
+    backendProc.stderr?.on('data', d => {
+      const text = d.toString().trim();
+      console.error(`[backend stderr] ${text}`);
+    });
+
+    // 5. 等待后端就绪
+    console.log('[electron] [5/5] Waiting for backend to be ready...');
+    await waitBackendReady();
+    console.log('[electron]   ✓ Backend is ready!');
+
+    // 6. 通知前端
     await win?.webContents.executeJavaScript(`window.__BACKEND_PORT__ = ${BACKEND_PORT};`);
     win?.webContents.send('backend:ready', { port: BACKEND_PORT });
-  } catch (e) {
-    console.error('[backend] spawn failed:', e);
+    console.log('[electron] ========================================');
+    console.log('[electron] Backend startup completed successfully');
+    console.log('[electron] ========================================');
+
+  } catch (spawnErr) {
+    const errMsg = `Spawn failed: ${spawnErr}`;
+    console.error(`[electron]   ✗ ${errMsg}`);
+    throw new Error(errMsg);
   }
 }
 
@@ -407,66 +519,145 @@ function waitBackendReady(): Promise<void> {
 
 /**
  * 停止后端（优雅关闭 + tree-kill 兜底）
+ * 幂等设计：支持多次调用，防止重入
  */
 async function stopBackend(graceful = true, timeoutMs = 2000) {
-  const p = backendProc;
-  if (!p || !p.pid) return;
-
-  const oldPort = BACKEND_PORT;
-
-  // 1. 尝试优雅关闭
-  if (graceful) {
-    try {
-      await new Promise<void>((resolve) => {
-        const req = http.request({
-          hostname: '127.0.0.1',
-          port: BACKEND_PORT,
-          path: '/__internal__/shutdown',
-          method: 'POST',
-          timeout: 1000
-        }, () => resolve());
-        req.on('error', () => resolve());
-        req.end();
-      });
-    } catch {}
+  // 幂等检查：如果正在停止或已无进程，直接返回
+  if (isStoppingBackend) {
+    console.log('[electron] stopBackend already in progress, skipping...');
+    return;
   }
 
-  // 2. 等待进程退出
-  const done = new Promise<void>((resolve) => {
-    p.once('exit', () => resolve());
-  });
+  const p = backendProc;
+  if (!p || !p.pid) {
+    console.log('[electron] No backend process to stop');
+    return;
+  }
 
-  const timer = setTimeout(() => {
-    // 3. 超时后使用 tree-kill 强制清理进程树
-    const pid = p.pid;
-    if (pid) {
-      console.log(`[electron] Timeout, killing backend process tree (PID: ${pid})`);
-      treeKill(pid, 'SIGKILL', (err) => {
-        if (err) console.error('[electron] tree-kill failed:', err);
-      });
+  // 标记正在停止
+  isStoppingBackend = true;
+  const pid = p.pid;
+  const oldPort = BACKEND_PORT;
+
+  try {
+    console.log(`[electron] Stopping backend (PID: ${pid}, graceful: ${graceful})`);
+
+    // 1. 尝试优雅关闭
+    if (graceful) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const req = http.request({
+            hostname: '127.0.0.1',
+            port: BACKEND_PORT,
+            path: '/__internal__/shutdown',
+            method: 'POST',
+            timeout: 1000
+          }, () => {
+            console.log('[electron] Graceful shutdown request sent');
+            resolve();
+          });
+          req.on('error', (err) => {
+            console.log('[electron] Graceful shutdown request failed:', err.message);
+            resolve(); // 失败也继续
+          });
+          req.setTimeout(1000, () => {
+            req.destroy();
+            resolve();
+          });
+          req.end();
+        });
+      } catch (err) {
+        console.log('[electron] Graceful shutdown error:', err);
+      }
     }
-  }, timeoutMs);
 
-  await done.catch(() => {});
-  clearTimeout(timer);
-  backendProc = null;
+    // 2. 等待进程退出
+    const done = new Promise<void>((resolve) => {
+      p.once('exit', (code) => {
+        console.log(`[electron] Backend process exited (code: ${code})`);
+        resolve();
+      });
+    });
 
-  // 4. 等待端口释放
-  await waitPortRelease(oldPort);
+    const timer = setTimeout(() => {
+      // 3. 超时后使用 tree-kill 强制清理进程树
+      console.log(`[electron] Timeout (${timeoutMs}ms), force killing process tree (PID: ${pid})`);
+      treeKill(pid, 'SIGKILL', (err) => {
+        if (err) {
+          console.error('[electron] tree-kill failed:', err);
+        } else {
+          console.log('[electron] Process tree killed successfully');
+        }
+      });
+    }, timeoutMs);
+
+    await done.catch(() => {});
+    clearTimeout(timer);
+
+    // 4. 等待端口释放
+    console.log(`[electron] Waiting for port ${oldPort} to be released...`);
+    await waitPortRelease(oldPort);
+    console.log(`[electron] Port ${oldPort} released successfully`);
+  } finally {
+    // 5. 清理句柄（finally 确保必定执行）
+    backendProc = null;
+    isStoppingBackend = false;
+    console.log('[electron] Backend cleanup complete');
+  }
 }
 
+// ---- 应用退出路径统一处理 ----
+
+// 优雅关闭标记（防止重复处理）
+let isQuitting = false;
+
 app.on('will-quit', async (event) => {
-  try {
-    event.preventDefault();
-  } catch {}
-  await stopBackend(true, 1500);
+  if (isQuitting) return;
+
+  event.preventDefault();
+  isQuitting = true;
+
+  console.log('[electron] Application quitting, stopping backend...');
+  await stopBackend(true, 2000);
+  console.log('[electron] Backend stopped, exiting application');
+
   app.exit(0);
 });
-process.on('exit', () => { try { backendProc?.kill(); } catch {} });
-process.on('SIGINT', async () => { await stopBackend(); process.exit(0); });
-process.on('SIGTERM', async () => { await stopBackend(); process.exit(0); });
 
-// ---------- 选择工作区对话框 & 运行时安装（占位） ----------
+// process.on('exit') 是同步的，不能使用 async/await
+// 作为最后的兜底，尝试强制 kill（可能不会生效，因为 stopBackend 已经清理了）
+process.on('exit', () => {
+  if (backendProc?.pid) {
+    console.log('[electron] process.exit hook: force killing backend');
+    try {
+      // Windows 不支持 SIGKILL，使用无参数的 kill() 强制终止
+      if (process.platform === 'win32') {
+        backendProc.kill();
+      } else {
+        backendProc.kill('SIGKILL');
+      }
+    } catch (e) {
+      console.error('[electron] Failed to kill backend in exit hook:', e);
+    }
+  }
+});
+
+// SIGINT/SIGTERM 统一走 app.quit() 触发 will-quit
+process.on('SIGINT', () => {
+  console.log('[electron] Received SIGINT, quitting...');
+  if (!isQuitting) {
+    app.quit();
+  }
+});
+
+process.on('SIGTERM', () => {
+  console.log('[electron] Received SIGTERM, quitting...');
+  if (!isQuitting) {
+    app.quit();
+  }
+});
+
+// ---------- 选择工作区对话框 ----------
 ipcMain.handle('system:selectWorkspaceDialog', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
   return { canceled: res.canceled, path: res.filePaths?.[0] || '' };

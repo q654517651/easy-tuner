@@ -6,7 +6,8 @@ export type TrainTask = {
   createdAt: string; // YYYY-MM-DD
   total: number;
   done: number;
-  throughput: number; // it/s
+  throughput: number; // 速度值
+  throughputUnit?: string; // 速度单位：'it/s' 或 's/it'
   eta: string; // 10h 30min
 };
 

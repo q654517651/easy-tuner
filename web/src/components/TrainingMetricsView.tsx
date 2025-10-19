@@ -9,8 +9,8 @@ type Point = { step: number; value: number; wall_time: number };
 type Metrics = { loss?: Point[]; learning_rate?: Point[]; epoch?: Point[] };
 type SeriesData = { x: number[]; y: number[]; yAvg?: number[] };
 
-// 刷新节流（避免高频重绘）：每 1.5s flush 一次增量
-const FLUSH_INTERVAL_MS = 1500;
+// 刷新节流（避免高频重绘）：每 1s flush 一次增量
+const FLUSH_INTERVAL_MS = 1000;
 // 数据上限，避免内存与绘制压力过大
 const MAX_POINTS = 5000;
 
@@ -254,6 +254,8 @@ export const TrainingMetricsView: React.FC<TrainingMetricsViewProps> = ({
       clearInterval(flushTimerRef.current);
       flushTimerRef.current = null;
     }
+    // 立即刷新一次（切换到 metrics tab 时）
+    flushPending();
     flushTimerRef.current = window.setInterval(flushPending, FLUSH_INTERVAL_MS);
     return () => {
       if (flushTimerRef.current) {
@@ -333,7 +335,7 @@ export const TrainingMetricsView: React.FC<TrainingMetricsViewProps> = ({
       },
       y: {
         auto: true,
-        range: isLearningRate ? [0, null] : [null, null], // 学习率从0开始
+        range: [null, null], // 自动适配 Y 轴范围
       },
     },
     axes: [

@@ -130,7 +130,7 @@ class BaseTrainingConfig:
         default=16,
         metadata={
             "group": ParameterGroup.BASIC.key,
-            "label": "训练轮数",
+            "label": "训练轮数(Epoch)",
             "widget": "number",
             "min": 1, "max": 100,
             "help": "完整数据集遍历次数",
@@ -143,7 +143,7 @@ class BaseTrainingConfig:
         default=1,
         metadata={
             "group": ParameterGroup.BASIC.key,
-            "label": "批大小",
+            "label": "批次大小(Batch Size)",
             "widget": "number",
             "min": 1,
             "max": 64,
@@ -161,10 +161,10 @@ class BaseTrainingConfig:
         default=1,
         metadata={
             "group": ParameterGroup.BASIC.key,
-            "label": "梯度累计",
+            "label": "梯度累计(gradient_checkpointing)",
             "widget": "number",
             "min": 1, "max": 1024,
-            "help": "反向传播前累计的步数（等效更大批量）",
+            "help": "和批次大小效果基本等同",
             "target": "cli",
             "cli": {"type": "value", "name": "--gradient_accumulation_steps", "formatter": "int",
                     "emit_if_default": False}
@@ -191,7 +191,7 @@ class BaseTrainingConfig:
     enable_bucket: bool = field(
         default=True,
         metadata={
-            "group": ParameterGroup.BASIC.key,
+            "group": ParameterGroup.DATASET.key,
             "label": "启用分桶",
             "widget": "switch",
             "help": "自动分辨率分桶以提高训练效率",
@@ -207,7 +207,7 @@ class BaseTrainingConfig:
     bucket_no_upscale: bool = field(
         default=False,
         metadata={
-            "group": ParameterGroup.BASIC.key,
+            "group": ParameterGroup.DATASET.key,
             "label": "禁用放大",
             "widget": "switch",
             "help": "启用后分桶不会对小图放大，只对大图缩小",
@@ -250,7 +250,7 @@ class BaseTrainingConfig:
         default=30,
         metadata={
             "group": ParameterGroup.BASIC.key,  # 可按你的分组改：BASIC/ADVANCED等
-            "label": "Block Swap（交换块数）",
+            "label": "内存交换块(Block Swap)",
             "widget": "number",
             "min": 0, "max": 64,
             "help": (
@@ -320,19 +320,19 @@ class BaseTrainingConfig:
         }
     )
 
-    # TODO 这里有个问题 选择constant时不应该展示预热相关的，因为constant不支持预热，以及当选择比例的时候并没有比例可选，但这个之后再解决
-    warmup_mode: str = field(
-        default="steps",
-        metadata={
-            "group": ParameterGroup.OPTIMIZER.key,
-            "label": "Warmup 模式",
-            "widget": "dropdown",
-            "options": ["steps", "ratio"],
-            "help": "选择 warmup 方式：步数 或 比例",
-            "target": "cli",
-            "enable_if": {"scheduler__in": ["cosine", "linear", "constant_with_warmup", "cosine_with_restarts"]}
-        }
-    )
+    # TODO 暂时先取消预热模式切换，等待后续完善
+    # warmup_mode: str = field(
+    #     default="steps",
+    #     metadata={
+    #         "group": ParameterGroup.OPTIMIZER.key,
+    #         "label": "Warmup 模式",
+    #         "widget": "dropdown",
+    #         "options": ["steps", "ratio"],
+    #         "help": "选择 warmup 方式：步数 或 比例",
+    #         "target": "cli",
+    #         "enable_if": {"scheduler__in": ["cosine", "linear", "constant_with_warmup", "cosine_with_restarts"]}
+    #     }
+    # )
 
     warmup_steps: int = field(
         default=0,
@@ -376,6 +376,7 @@ class BaseTrainingConfig:
             "widget": "textarea",
             "help": "训练中用于生成预览的提示词（可空）",
             "target": "sample",
+            "enable_if": {"sampling_enabled": True},
             "ui_hidden": False, "persist": True
         }
     )
@@ -485,6 +486,7 @@ class BaseTrainingConfig:
             "min": 1, "max": 100,
             "help": "每隔多少个 epoch 生成一次预览",
             "target": "cli",
+            "enable_if": {"sampling_enabled": True},
             "cli": {"type": "value", "name": "--sample_every_n_epochs", "formatter": "int", "emit_if_default": False}
         }
     )
@@ -496,6 +498,7 @@ class BaseTrainingConfig:
             "label": "首轮即采样",
             "widget": "switch",
             "help": "在第 1 个 epoch 结束时也生成一次预览",
+            "enable_if": {"sampling_enabled": True},
             "target": "cli",
             "cli": {"type": "toggle_true", "name": "--sample_at_first", "emit_if_default": False}
         }
@@ -744,7 +747,7 @@ class FluxKontext(BaseTrainingConfig):
             "group": ParameterGroup.PATH.key,
             "label": "DiT 模型路径",
             "widget": "file_picker",
-            "help": "Qwen-Image DiT模型文件路径",
+            "help": "Flux-Kontext DiT模型文件路径",
             "cli": {"name": "--dit", "type": "value", "formatter": "path"},
             "ui_hidden": False, "persist": True
         }
@@ -793,7 +796,7 @@ class Wan21(BaseTrainingConfig):
             "group": ParameterGroup.PATH.key,
             "label": "Wan2.1 模型路径",
             "widget": "file_picker",
-            "help": "Qwen-Image DiT模型文件路径",
+            "help": "Wan2.1 DiT模型文件路径",
             "cli": {"name": "--dit", "type": "value", "formatter": "path"},
             "ui_hidden": False, "persist": True
         }
@@ -902,7 +905,8 @@ class TrainingTask:
     loss: float = 0.0
     learning_rate: float = 0.0
     eta_seconds: Optional[int] = None
-    speed: Optional[float] = None  # it/s
+    speed: Optional[float] = None  # 速度值
+    speed_unit: str = "it/s"  # 速度单位：'it/s' 或 's/it'
     created_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

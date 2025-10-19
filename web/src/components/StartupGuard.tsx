@@ -14,9 +14,10 @@ function getWorkspaceMessage(reason?: string) {
 
 function getRuntimeMessage(reason?: string) {
   switch (reason) {
-    case "PYTHON_MISSING": return "缺少 Python 运行时，开始训练前需要安装";
+    case "PYTHON_MISSING": return "缺少 Python 环境，开始训练前需要安装";
+    case "MUSUBI_MISSING": return "缺少 Musubi 引擎（子仓库），请先安装/修复";
     case "ENGINES_MISSING": return "缺少训练引擎，开始训练前需要安装/修复";
-    default: return "运行时状态异常，请在设置里检查";
+    default: return "训练环境状态异常，请在设置里检查";
   }
 }
 
@@ -73,4 +74,5 @@ export default function StartupGuard() {
 
   return null;
 }
+
 

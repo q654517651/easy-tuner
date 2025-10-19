@@ -209,8 +209,10 @@ class WebSocketManager:
 
         await self._broadcast_to_task_subscribers(transition.task_id, message)
 
-        # 终态处理：自动关闭WebSocket连接（带最终状态）
+        # 终态处理：延迟关闭WebSocket连接，确保最终日志能够发送
         if transition.to_state.is_terminal():
+            # 延迟500ms关闭连接，给最终日志消息留出时间
+            await asyncio.sleep(0.5)
             await self._close_task_connections(transition.task_id, final_state=transition.to_state.value)
 
     async def _handle_training_log(self, payload: Dict[str, Any]) -> None:
@@ -328,6 +330,24 @@ class WebSocketManager:
                     }
                 }
         return await self._await_on_loop(_inner)
+
+    async def close_all(self) -> None:
+        """关闭所有 WebSocket 连接（应用关闭时调用）"""
+        async def _inner():
+            if self._lock is None:
+                self._lock = asyncio.Lock()
+            async with self._lock:
+                logger.info(f"正在关闭 {len(self._connections)} 个 WebSocket 连接...")
+                for client_id, ws in list(self._connections.items()):
+                    try:
+                        await ws.close(code=1001, reason="Server shutdown")
+                    except Exception as e:
+                        logger.debug(f"关闭 WebSocket 连接失败 {client_id}: {e}")
+                self._connections.clear()
+                self._subscriptions.clear()
+                self._sequence_counters.clear()
+                logger.info("所有 WebSocket 连接已关闭")
+        await self._await_on_loop(_inner)
 
 
 # 全局WebSocket管理器实例

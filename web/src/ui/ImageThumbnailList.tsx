@@ -51,7 +51,7 @@ function ThumbnailItem({ image, isSelected, onClick }: ThumbnailItemProps) {
           className="object-cover aspect-square w-full"
           muted
           playsInline
-          preload="metadata"
+          preload="metadata" draggable={false}
         />
       ) : (
         <Image
@@ -67,6 +67,7 @@ function ThumbnailItem({ image, isSelected, onClick }: ThumbnailItemProps) {
           onLoad={() => {/* 可选：埋点/日志 */}}
           onError={() => {/* 可选：上报 */}}
           removeWrapper
+          draggable={false}
         />
       )}
 
@@ -128,3 +129,4 @@ export default function ImageThumbnailList({ images, selectedImageId, onImageSel
     </div>
   );
 }
+

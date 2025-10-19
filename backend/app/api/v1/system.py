@@ -276,10 +276,13 @@ async def runtime_status():
     paths = get_paths()
     python_ok = paths.runtime_python_exists
     engines_ok = paths.engines_dir.exists()
+    musubi_ok = paths.musubi_exists
 
     # 判断 reason
     if not python_ok:
         reason = "PYTHON_MISSING"
+    elif not musubi_ok:
+        reason = "MUSUBI_MISSING"
     elif not engines_ok:
         reason = "ENGINES_MISSING"
     else:
@@ -290,5 +293,6 @@ async def runtime_status():
         'runtime_path': str(paths.runtime_dir),
         'python_present': python_ok,
         'engines_present': engines_ok,
+        'musubi_present': musubi_ok,
         'reason': reason,
     }, message="运行时状态")

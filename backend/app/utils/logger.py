@@ -53,13 +53,35 @@ class EasyTunerLogger:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 
-        # 控制台
+        # 控制台 - 强制UTF-8编码（避免Windows GBK问题）
+        import io
+
+        # Windows环境下替换stdout为UTF-8编码的TextIOWrapper
+        if sys.platform == 'win32':
+            try:
+                if hasattr(sys.stdout, 'buffer') and not isinstance(sys.stdout, io.TextIOWrapper):
+                    sys.stdout = io.TextIOWrapper(
+                        sys.stdout.buffer,
+                        encoding='utf-8',
+                        errors='replace',
+                        line_buffering=True
+                    )
+                if hasattr(sys.stderr, 'buffer') and not isinstance(sys.stderr, io.TextIOWrapper):
+                    sys.stderr = io.TextIOWrapper(
+                        sys.stderr.buffer,
+                        encoding='utf-8',
+                        errors='replace',
+                        line_buffering=True
+                    )
+            except Exception:
+                pass  # 如果替换失败，继续使用原有的stdout
+
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
 
-        # 文件
+        # 文件 - 强制UTF-8编码
         try:
             backend_dir = Path(__file__).parent.parent.parent
             log_dir = backend_dir / "logs"
