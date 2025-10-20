@@ -8,17 +8,19 @@ const RAW_BASE =
 
 const inferDefaultOrigin = () => {
   try {
-    // 优先使用 Electron 注入的动态端口
+    // Electron 环境：使用注入的动态端口
     if (typeof window !== 'undefined' && (window as any).__BACKEND_PORT__) {
       const port = (window as any).__BACKEND_PORT__;
       return `http://127.0.0.1:${port}`;
     }
 
+    // Web 环境（开发 dev server 或云服务器）：使用相对路径
+    // Vite 代理会自动转发到后端
     if (typeof location !== 'undefined' && location.protocol.startsWith('http')) {
-      return `${location.protocol}//127.0.0.1:8000`;
+      return '';  // 相对路径
     }
   } catch {}
-  return 'http://127.0.0.1:8000';
+  return '';  // 默认相对路径
 };
 
 // 调试开关（动态检查）
