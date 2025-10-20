@@ -101,6 +101,8 @@ app.add_middleware(
         "http://localhost:5173","http://127.0.0.1:5173",
         "http://localhost:5174","http://127.0.0.1:5174",
         "http://localhost:5175", "http://127.0.0.1:5175",
+        "http://localhost:6006", "http://127.0.0.1:6006",  # 云服务器端口
+        "http://0.0.0.0:6006",  # 云服务器监听所有接口
     ],
     allow_origin_regex=r".*",
     allow_credentials=False,

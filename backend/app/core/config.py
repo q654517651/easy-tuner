@@ -235,6 +235,24 @@ def get_config() -> AppConfig:
     global _config
     if _config is None:
         _config = load_config()
+        
+        # ✨ 开发环境下，如果配置文件不存在则自动创建
+        # 打包环境通过UI选择workspace时会自动保存配置
+        import sys
+        is_dev_mode = not getattr(sys, 'frozen', False)
+        
+        if is_dev_mode:
+            config_path = get_config_path()
+            if not os.path.exists(config_path):
+                try:
+                    from ..utils.logger import log_info
+                    log_info(f"[Config] 开发环境首次启动，创建默认配置: {config_path}")
+                    save_config(_config, config_path)
+                except Exception as e:
+                    # 创建失败不阻断启动（可能是权限问题）
+                    from ..utils.logger import log_warning
+                    log_warning(f"[Config] 创建默认配置失败: {e}")
+    
     return _config
 
 
