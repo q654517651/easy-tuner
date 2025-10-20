@@ -31,9 +31,9 @@ contextBridge.exposeInMainWorld("winCtrl", {
 
 // Electron专用API
 contextBridge.exposeInMainWorld("electron", {
-  // 打开文件夹
-  openFolder: (taskId: string, kind: "sample" | "output") =>
-    ipcRenderer.invoke("open-folder", { taskId, kind }) as Promise<{ ok: boolean; error?: string }>,
+  // 打开文件夹（接收绝对路径）
+  openFolder: (folderPath: string) =>
+    ipcRenderer.invoke("open-folder", { folderPath }) as Promise<{ ok: boolean; error?: string }>,
   // 选择工作区目录
   selectWorkspace: () => ipcRenderer.invoke('system:selectWorkspaceDialog') as Promise<{ canceled: boolean; path: string }>,
 });

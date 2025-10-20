@@ -238,23 +238,14 @@ ipcMain.handle("app:getPaths", () => {
 });
 
 // ---- IPC：文件夹打开功能 ----
-ipcMain.handle("open-folder", async (_evt, { taskId, kind }: { taskId: string; kind: "sample" | "output" }) => {
+ipcMain.handle("open-folder", async (_evt, { folderPath }: { folderPath: string }) => {
   try {
-    // 构建目录路径（打包后使用 resources/workspace）
-    const baseWorkspace = isProd
-      ? path.resolve(process.resourcesPath, "workspace")
-      : path.resolve(process.cwd(), "workspace");
-    const base = path.resolve(baseWorkspace, "tasks", taskId, "output");
-    const target = path.resolve(base, kind === "sample" ? "sample" : ".");
-
-    // 安全检查：确保目标路径在基础路径内
-    if (!target.startsWith(base)) {
-      return { ok: false, error: "禁止访问该路径" };
-    }
+    // 直接使用前端传递的绝对路径
+    const target = path.resolve(folderPath);
 
     // 检查目录是否存在
     if (!fs.existsSync(target)) {
-      return { ok: false, error: "目录不存在" };
+      return { ok: false, error: `目录不存在: ${target}` };
     }
 
     // 尝试打开目录

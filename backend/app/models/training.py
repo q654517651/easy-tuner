@@ -60,6 +60,7 @@ class TrainingTaskDetail(BaseModel):
     checkpoint_files: List[str] = Field(default_factory=list)
     sample_images: List[str] = Field(default_factory=list)
     config: Dict[str, Any] = Field(default_factory=dict, description="训练配置")
+    task_dir_name: Optional[str] = Field(None, description="任务目录名（格式: {id}--{name}）")
 
 
 class CreateTrainingTaskRequest(BaseModel):

@@ -318,6 +318,10 @@ pause
         if not task:
             return None
 
+        # 获取任务目录名（用于前端拼接完整路径）
+        task_dir = self._training_manager.get_task_dir(task_id)
+        task_dir_name = task_dir.name if task_dir else None
+
         # 尝试从TensorBoard获取最新进度（不管任务状态）
         try:
             tb_service = get_tb_event_service()
@@ -368,7 +372,8 @@ pause
             output_dir=task.output_dir,
             checkpoint_files=task.checkpoint_files,
             sample_images=task.sample_images,
-            config=self._convert_config_to_dict(task.config)
+            config=self._convert_config_to_dict(task.config),
+            task_dir_name=task_dir_name
         )
 
     async def start_task(self, task_id: str) -> Tuple[bool, str]:

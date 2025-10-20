@@ -114,6 +114,8 @@ python backend/startup.py
 
 #### 3. 前端设置
 
+**本地开发（Electron 桌面模式）**：
+
 ```bash
 # 进入前端目录
 cd web
@@ -121,11 +123,50 @@ cd web
 # 安装依赖
 pnpm install
 
-# 启动开发服务器
+# 启动开发服务器（会启动 Electron 窗口）
 pnpm dev
 ```
 
 前端将在 `http://localhost:5173` 运行
+
+**云服务器部署（纯 Web 模式）**：
+
+适用于 AutoDL、Colab 等云服务器环境，不启动 Electron 窗口。
+
+```bash
+# 进入前端目录
+cd web
+
+# 安装依赖
+pnpm install
+
+# 启动 Web 服务器（监听所有网络接口，端口 6006）
+pnpm dev:web
+```
+
+前端将在 `http://0.0.0.0:6006` 运行，可通过云服务器提供的公网地址访问。
+
+**云服务器完整启动流程**：
+
+```bash
+# 1. 启动后端（终端1）
+cd backend
+python startup.py
+
+# 2. 启动前端（终端2）
+cd web
+pnpm dev:web
+```
+
+**AutoDL 端口映射配置**：
+- 容器端口: `6006`
+- 映射类型: HTTP
+- 访问通过 AutoDL 提供的公网地址
+
+**注意事项**：
+- 云服务器模式下不包含 Electron 桌面功能（如"打开目录"按钮将不显示）
+- 确保后端已启动并运行在 `http://localhost:8000`
+- 如需修改前端端口，编辑 `web/vite.config.web.ts` 中的 `port` 配置
 
 ### 生产环境构建
 

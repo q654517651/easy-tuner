@@ -6,6 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --config vite.config.web.ts",
     "build:web": "vite build",
     "build:app": "tsc -p electron/tsconfig.json",
     "build": "pnpm build:web && pnpm build:app",

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 
 import { Card, CardBody, CardHeader, CardFooter, Image, Button, addToast } from "@heroui/react";
 
-import { trainingApi } from "../services/api";
+import { trainingApi, getApiBaseUrl } from "../services/api";
 
 
 
@@ -31,6 +31,9 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
 
   // 检测是否为 Electron 环境（桌面应用）
   const [isElectron, setIsElectron] = useState(false);
+
+  // 保存任务目录名（格式：{id}--{safe_name}）
+  const [taskDirName, setTaskDirName] = useState<string | null>(null);
 
 
 
@@ -88,6 +91,28 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
     setIsElectron(!!window.electron?.openFolder);
   }, []);
 
+  // 获取任务详情以获取完整目录名
+  useEffect(() => {
+    const fetchTaskInfo = async () => {
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/training/tasks/${taskId}`);
+        const result = await response.json();
+        if (result.data?.task_dir_name) {
+          setTaskDirName(result.data.task_dir_name);
+        } else {
+          // 回退方案：如果后端没有返回 task_dir_name，使用 taskId
+          console.warn('后端未返回 task_dir_name，使用 taskId 作为回退');
+          setTaskDirName(taskId);
+        }
+      } catch (error) {
+        console.error('获取任务信息失败:', error);
+        // 回退方案
+        setTaskDirName(taskId);
+      }
+    };
+    fetchTaskInfo();
+  }, [taskId]);
+
 
   // 打开系统文件夹
 
@@ -97,9 +122,73 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
 
       if (window.electron?.openFolder) {
 
-        const result = await window.electron.openFolder(taskId, kind);
+        // 检查是否已获取目录名
 
-        if (result.ok) {
+        if (!taskDirName) {
+
+          addToast({
+
+            title: "无法打开",
+
+            description: "任务目录信息未加载",
+
+            color: "warning",
+
+            timeout: 3000
+
+          });
+
+          return;
+
+        }
+
+        
+
+        // 从后端获取工作区路径
+
+        const response = await fetch(`${getApiBaseUrl()}/system/workspace/status`);
+
+        const result = await response.json();
+
+        
+
+        if (!result.data?.path) {
+
+          addToast({
+
+            title: "无法打开",
+
+            description: "工作区未设置",
+
+            color: "warning",
+
+            timeout: 3000
+
+          });
+
+          return;
+
+        }
+
+        
+
+        const workspaceRoot = result.data.path;
+
+        // 使用完整的目录名拼接路径（格式：{id}--{safe_name}）
+
+        const folderPath = kind === "sample"
+
+          ? `${workspaceRoot}/tasks/${taskDirName}/output/sample`
+
+          : `${workspaceRoot}/tasks/${taskDirName}/output`;
+
+        
+
+        const openResult = await window.electron.openFolder(folderPath);
+
+        
+
+        if (openResult.ok) {
 
           // 成功打开，无需任何提示
 
@@ -107,15 +196,17 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
 
         }
 
+        
+
         // 失败时显示错误
 
-        console.error('打开文件夹失败:', result.error);
+        console.error('打开文件夹失败:', openResult.error);
 
         addToast({
 
           title: "打开文件夹失败",
 
-          description: result.error || "无法打开文件夹",
+          description: openResult.error || "无法打开文件夹",
 
           color: "danger",
 
@@ -220,11 +311,9 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
 
                   src={item.url}
 
-                  onError={(e) => {
+                  onError={() => {
 
                     console.error('图片加载失败:', item.url);
-
-                    (e.target as HTMLImageElement).style.display = 'none';
 
                   }}
 

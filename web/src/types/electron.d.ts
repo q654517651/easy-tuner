@@ -37,8 +37,8 @@ declare global {
     };
 
     electron?: {
-      // 打开文件夹
-      openFolder(taskId: string, kind: "sample" | "output"): Promise<{ ok: boolean; error?: string }>;
+      // 打开文件夹（接收绝对路径）
+      openFolder(folderPath: string): Promise<{ ok: boolean; error?: string }>;
       // 选择工作区目录
       selectWorkspace(): Promise<{ canceled: boolean; path: string }>;
     };
