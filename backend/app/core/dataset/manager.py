@@ -118,7 +118,7 @@ class DatasetManager:
             # 保持未就绪
             return False
 
-    def create_dataset(self, name: str, description: str = "", dataset_type: str = "image") -> Tuple[bool, str]:
+    def create_dataset(self, name: str, dataset_type: str = "image") -> Tuple[bool, str]:
         """创建新数据集"""
         with self._lock:
             try:
@@ -142,7 +142,6 @@ class DatasetManager:
                 dataset = Dataset(
                     dataset_id=dataset_id,
                     name=name,
-                    description=description,
                     dataset_type=dataset_type
                 )
 
@@ -271,7 +270,6 @@ class DatasetManager:
         for info in self.datasets.values():
             dataset = info['dataset']
             if (keyword in dataset.name.lower() or
-                    keyword in dataset.description.lower() or
                     keyword in ' '.join(dataset.tags).lower()):
                 results.append(dataset)
 

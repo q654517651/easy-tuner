@@ -29,7 +29,6 @@ interface Dataset {
   id: string;
   name: string;
   type: string;
-  description: string;
   total_count: number;
   labeled_count: number;
   media_items: MediaItem[];

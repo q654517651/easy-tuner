@@ -782,7 +782,7 @@ class TrainingManager:
     def list_task_artifacts(self, task_id: str) -> list[dict]:
         """返回产物权重列表，每项包含 filename 与相对路径 rel_path。
 
-        优先读取 Task.checkpoint_files；若为空，则扫描 task_id/output 下 *.safetensors。
+        始终重新扫描 task_id/output 下的 *.safetensors 文件，确保返回最新的完整列表。
         rel_path 以任务目录为基准（如 output/xxx.safetensors）。
         """
         from pathlib import Path as _P
@@ -795,27 +795,27 @@ class TrainingManager:
                 error_code="TRAINING_NOT_FOUND",
             )
 
-        rel_list: list[str] = list(getattr(task, 'checkpoint_files', []) or [])
-        rel_list = [rp.replace('\\', '/') for rp in rel_list]
+        rel_list: list[str] = []
         items: list[dict] = []
 
-        if not rel_list:
-            try:
-                task_dir = self._find_task_dir(task.id)
-                if not task_dir:
-                    return items
+        # 始终重新扫描目录，不使用缓存（避免训练中途记录的不完整列表）
+        try:
+            task_dir = self._find_task_dir(task.id)
+            if not task_dir:
+                return items
 
-                output_dir = task_dir / 'output'
-                if output_dir.exists():
-                    for model_file in output_dir.rglob('*.safetensors'):
-                        if model_file.is_file():
-                            rel_path = model_file.relative_to(task_dir).as_posix()
-                            rel_list.append(rel_path)
-                rel_list.sort()
-                with self._lock:
-                    task.checkpoint_files = rel_list
-            except Exception as e:
-                log_error(f"扫描模型产物失败: {e}")
+            output_dir = task_dir / 'output'
+            if output_dir.exists():
+                for model_file in output_dir.rglob('*.safetensors'):
+                    if model_file.is_file():
+                        rel_path = model_file.relative_to(task_dir).as_posix()
+                        rel_list.append(rel_path)
+            rel_list.sort()
+            # 更新缓存（仅用于其他功能引用，不影响本方法）
+            with self._lock:
+                task.checkpoint_files = rel_list
+        except Exception as e:
+            log_error(f"扫描模型产物失败: {e}")
 
         for rel_path in rel_list:
             filename = _P(rel_path).name

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button, Input, Select, SelectItem, Textarea } from '@heroui/react';
+import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button, Input, Select, SelectItem } from '@heroui/react';
 import { fetchJson } from '../services/api';
 import { useReadiness } from '../contexts/ReadinessContext';
 import { readinessApi } from '../services/api';
@@ -7,13 +7,12 @@ import { readinessApi } from '../services/api';
 interface CreateDatasetDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (data: { name: string; type: string; description: string }) => Promise<void>;
+  onSubmit: (data: { name: string; type: string }) => Promise<void>;
 }
 
 export default function CreateDatasetDialog({ isOpen, onClose, onSubmit }: CreateDatasetDialogProps) {
   const [name, setName] = useState('');
   const [type, setType] = useState('');
-  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [datasetTypes, setDatasetTypes] = useState<{value: string; label: string}[]>([]);
@@ -48,11 +47,10 @@ export default function CreateDatasetDialog({ isOpen, onClose, onSubmit }: Creat
     try {
       setLoading(true);
       setError(null);
-      await onSubmit({ name: name.trim(), type, description: description.trim() });
+      await onSubmit({ name: name.trim(), type });
       // 重置表单
       setName('');
       setType(datasetTypes.length > 0 ? datasetTypes[0].value : '');
-      setDescription('');
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建失败');
@@ -65,7 +63,6 @@ export default function CreateDatasetDialog({ isOpen, onClose, onSubmit }: Creat
     if (!loading) {
       setName('');
       setType(datasetTypes.length > 0 ? datasetTypes[0].value : '');
-      setDescription('');
       setError(null);
       onClose();
     }
@@ -117,19 +114,6 @@ export default function CreateDatasetDialog({ isOpen, onClose, onSubmit }: Creat
                   </SelectItem>
                 ))}
               </Select>
-
-              {/* 描述 */}
-              <Textarea
-                label="描述 (可选)"
-                placeholder="请输入数据集描述"
-                value={description}
-                onValueChange={setDescription}
-                isDisabled={loading}
-                variant="bordered"
-                labelPlacement="outside"
-                minRows={3}
-                maxRows={5}
-              />
 
               {/* 错误信息 */}
               {error && (

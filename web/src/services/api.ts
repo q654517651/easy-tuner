@@ -112,7 +112,6 @@ interface DatasetDetail {
   id: string;
   name: string;
   type: string;
-  description: string;
   total_count: number;
   labeled_count: number;
   created_at: string;
@@ -175,7 +174,7 @@ export const datasetApi = {
   },
 
   // 创建数据集
-  async createDataset(data: { name: string; type: string; description?: string }): Promise<DatasetBrief | null> {
+  async createDataset(data: { name: string; type: string }): Promise<DatasetBrief | null> {
     try {
       const response = await fetch(`${getApiBaseUrl()}/datasets`, {
         method: 'POST',

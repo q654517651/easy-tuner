@@ -47,7 +47,7 @@ export default function DatasetsList() {
     fetchDatasets();
   }, []);
 
-  const handleCreateDataset = async (data: { name: string; type: string; description: string }) => {
+  const handleCreateDataset = async (data: { name: string; type: string }) => {
     try {
       const newDataset = await datasetApi.createDataset(data);
       if (newDataset) {

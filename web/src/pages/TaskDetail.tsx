@@ -492,7 +492,7 @@ export default function TaskDetail() {
               </div>
               <div
                 ref={logContainerRef}
-                className="rounded-3xl bg-black text-white font-mono text-xs p-3 h-full overflow-auto"
+                className="rounded-3xl bg-black text-white font-mono text-xs p-3 h-full overflow-auto whitespace-pre"
                 onScroll={(e) => {
                   const el = e.currentTarget;
                   const threshold = 10; // 距离底部阈值像素

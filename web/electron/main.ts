@@ -408,6 +408,9 @@ async function startBackend() {
   // 4. Spawn 后端进程
   console.log('[electron] [4/5] Spawning backend process...');
   try {
+    // 设置默认 workspace 路径（用户数据目录）
+    const defaultWorkspace = path.join(app.getPath('userData'), 'workspace');
+    
     backendProc = spawn(exePath, [], {
       cwd: resourcesDir,  // 工作目录设为 resources/
       stdio: 'pipe',      // 捕获标准输入输出（调试用）
@@ -418,6 +421,7 @@ async function startBackend() {
         ...process.env,
         BACKEND_PORT: String(BACKEND_PORT),
         TAGTRAGGER_ROOT: resourcesDir,  // 明确指定项目根
+        DEFAULT_WORKSPACE: defaultWorkspace,  // 传递默认 workspace 路径（打包环境使用）
         ELECTRON_PPID: String(process.pid),  // 传递父进程 PID（用于后端自杀检测）
         ELECTRON_START_TIME: String(Date.now()),  // 传递启动时间戳
       }

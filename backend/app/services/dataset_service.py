@@ -121,7 +121,6 @@ class DatasetService:
             id=core_dataset.dataset_id,
             name=core_dataset.name,
             type=core_dataset.dataset_type,
-            description=core_dataset.description,
             total_count=stats['total'],
             labeled_count=stats['labeled'],
             created_at=core_dataset.created_time,
@@ -137,7 +136,6 @@ class DatasetService:
         """Create a new dataset and return success, message, and dataset_id"""
         success, message = self._dataset_manager.create_dataset(
             name=request.name,
-            description=request.description or "",
             dataset_type=request.type.value  # 使用枚举的字符串值
         )
 

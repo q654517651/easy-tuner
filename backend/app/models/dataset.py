@@ -22,7 +22,6 @@ class Dataset(BaseModel):
     dataset_id: str
     name: str
     type: DatasetType = DatasetType.IMAGE
-    description: str = ""
     created_at: datetime
     updated_at: datetime
     items: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -68,7 +67,6 @@ class DatasetDetail(BaseModel):
     id: str
     name: str
     type: DatasetType
-    description: str = ""
     total_count: int = 0
     labeled_count: int = 0
     created_at: datetime
@@ -86,7 +84,6 @@ class CreateDatasetRequest(BaseModel):
     """创建数据集请求"""
     name: str = Field(min_length=1, max_length=100, description="数据集名称")
     type: DatasetType = Field(description="数据集类型")
-    description: str = Field(default="", max_length=500, description="数据集描述")
     
     @validator('name')
     def validate_name(cls, v):
@@ -103,7 +100,6 @@ class CreateDatasetRequest(BaseModel):
 class UpdateDatasetRequest(BaseModel):
     """更新数据集请求"""
     name: Optional[str] = Field(default=None, min_length=1, max_length=100, description="数据集名称")
-    description: Optional[str] = Field(default=None, max_length=500, description="数据集描述")
     tags: Optional[List[str]] = Field(default=None, description="数据集标签")
 
 

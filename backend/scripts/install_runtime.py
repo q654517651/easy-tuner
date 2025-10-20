@@ -110,7 +110,7 @@ transformers==4.55.0
 voluptuous==0.15.2
 numpy==2.3.0
 tensorboard==2.19.0
-triton-windows==3.3.1.post19
+# triton-windows==3.3.1.post19 去掉不影响安装，并且win会发生编译错误
 hatchling
 editables
 """.strip()

@@ -179,7 +179,7 @@ class TrainingConfig:
 @dataclass
 class StorageConfig:
     """存储配置"""
-    workspace_root: str = "./workspace"
+    workspace_root: str = os.getenv("DEFAULT_WORKSPACE", "./workspace")
     datasets_dir: str = "datasets"
     cache_dir: str = "cache"
     models_dir: str = "models"

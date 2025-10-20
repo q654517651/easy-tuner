@@ -6,7 +6,7 @@ Dataset data models - FastAPI Backend version
 该模块定义了数据集管理的核心数据结构，主要包含：
 
 1. Dataset类：数据集主要数据模型
-   - 数据集基本信息（ID、名称、描述、时间戳）
+   - 数据集基本信息（ID、名称、时间戳）
    - 图像文件管理（文件名到标签的映射）
    - 标签数据管理和统计
    - 数据序列化和反序列化支持
@@ -104,7 +104,6 @@ class Dataset:
     dataset_id: str
     name: str
     dataset_type: str = "image"  # image, video, image_control (创建后不可更改)
-    description: str = ""
     created_time: Optional[str] = None
     modified_time: Optional[str] = None
     items: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # 统一数据存储
@@ -122,7 +121,6 @@ class Dataset:
             'dataset_id': self.dataset_id,
             'name': self.name,
             'dataset_type': self.dataset_type,
-            'description': self.description,
             'created_time': self.created_time,
             'modified_time': self.modified_time,
             'items': self.items,
@@ -143,7 +141,6 @@ class Dataset:
             dataset_id=data['dataset_id'],
             name=data['name'],
             dataset_type=data.get('dataset_type', 'image'),
-            description=data.get('description', ''),
             created_time=data.get('created_time'),
             modified_time=data.get('modified_time'),
             items=items,
