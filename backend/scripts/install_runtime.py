@@ -250,7 +250,8 @@ def find_system_python() -> str | None:
         # 对于 py launcher，需要额外参数
         py_versions = ['-3.11', '-3.10', '-3']
     else:
-        candidates = ['python3.11', 'python3.10', 'python3', 'python']
+        # Linux: 优先使用系统默认的 python3（而非特定版本号）
+        candidates = ['python3', 'python', 'python3.12', 'python3.11', 'python3.10']
         py_versions = []
 
     for cmd in candidates:

@@ -163,22 +163,81 @@ def _path_writable(p: Path) -> bool:
 @router.get("/system/workspace/status", response_model=DataResponse[dict])
 async def workspace_status():
     try:
+        import sys
         cfg = get_config()
         workspace_root = cfg.storage.workspace_root
-
-        # 判断是否未设置（仍为默认相对路径）
-        if not workspace_root or workspace_root.strip() in ('.', './workspace', 'workspace', ''):
+        
+        # 判断是否未设置（空值）
+        if not workspace_root or not workspace_root.strip():
             return DataResponse(data={
-                'path': workspace_root or '',
+                'path': '',
                 'exists': False,
                 'writable': False,
                 'reason': 'NOT_SET',
             }, message="工作区未设置")
-
-        # 已设置，解析为绝对路径进行检查
+        
+        # 🔧 新逻辑：在开发环境下，./workspace 是有效的相对路径
+        is_dev_mode = not getattr(sys, 'frozen', False)
+        is_relative_workspace = workspace_root.strip() in ('.', './workspace', 'workspace')
+        
+        # 开发环境 + 相对路径：自动处理
+        if is_dev_mode and is_relative_workspace:
+            # 解析为绝对路径（相对于项目根目录）
+            from ...core.environment import get_paths
+            try:
+                paths = get_paths()
+                root = paths.workspace_root
+            except:
+                # 回退：使用配置中的路径
+                root = Path(workspace_root).resolve()
+            
+            # 自动创建目录
+            if not root.exists():
+                try:
+                    root.mkdir(parents=True, exist_ok=True)
+                    from ...utils.logger import log_info
+                    log_info(f"[Workspace] 自动创建工作区目录: {root}")
+                except Exception as e:
+                    from ...utils.logger import log_error
+                    log_error(f"[Workspace] 创建工作区目录失败: {e}")
+                    return DataResponse(data={
+                        'path': str(root),
+                        'exists': False,
+                        'writable': False,
+                        'reason': 'NOT_WRITABLE',
+                    }, message="工作区目录创建失败")
+            
+            # 检查是否可写
+            if not _path_writable(root):
+                return DataResponse(data={
+                    'path': str(root),
+                    'exists': True,
+                    'writable': False,
+                    'reason': 'NOT_WRITABLE',
+                }, message="工作区目录无写入权限")
+            
+            # 一切正常
+            return DataResponse(data={
+                'path': str(root),
+                'exists': True,
+                'writable': True,
+                'reason': 'OK',
+            }, message="工作区状态")
+        
+        # 打包环境或已设置绝对路径：原有逻辑
+        if is_relative_workspace:
+            # 打包环境下的相对路径被视为未设置
+            return DataResponse(data={
+                'path': workspace_root,
+                'exists': False,
+                'writable': False,
+                'reason': 'NOT_SET',
+            }, message="工作区未设置")
+        
+        # 已设置绝对路径，检查状态
         root = Path(workspace_root).resolve()
         exists = root.exists()
-
+        
         if not exists:
             reason = "NOT_FOUND"
             writable = False
@@ -188,7 +247,7 @@ async def workspace_status():
         else:
             reason = "OK"
             writable = True
-
+        
         return DataResponse(data={
             'path': str(root),
             'exists': exists,

@@ -84,7 +84,7 @@ class EnvironmentManager:
         project_root = self._detect_project_root()
 
         # 🔒 双保险：若误返回了 .../resources/backend，则立刻回退到父级 resources
-        if project_root.name.lower() == "backend" and (project_root.parent / "runtime").exists():
+        if project_root.name.lower() == "backend" and (project_root.parent / "backend").exists():
             project_root = project_root.parent
 
         # 2) backend_root 固定为 resources/backend
@@ -167,20 +167,24 @@ class EnvironmentManager:
             if (parent_dir / "runtime").exists() or (parent_dir / "backend").exists():
                 return parent_dir
 
-        # 3) 开发环境：从当前文件向上找同时包含 backend/ 与 runtime/ 的目录
+        # 3) 开发环境：从当前文件向上找包含 backend/app 的目录
+        # 🔧 修复：不再要求 runtime 必须存在（runtime 会在需要时自动创建）
         current = Path(__file__).resolve()
         for p in (current, *current.parents):
-            if (p / "backend" / "app").exists() and ((p / "runtime").exists() or (p / "workspace" / "runtime").exists()):
+            if (p / "backend" / "app").exists():
+                # 优先选择同时包含其他典型目录的路径（更可靠）
+                if (p / "web").exists() or (p / "assets").exists() or (p / "README.md").exists():
+                    return p
+                # 如果只有 backend，也接受（最小要求）
                 return p
 
-        # 4) CWD 兜底（包含 runtime/）
+        # 4) CWD 兜底：如果当前目录包含 backend/app
         cwd = Path.cwd()
-        if (cwd / "runtime").exists() or (cwd / "workspace" / "runtime").exists():
+        if (cwd / "backend" / "app").exists():
             return cwd
 
         raise RuntimeError(
-            "无法检测项目根目录（期望 resources 级目录）。"
-            "打包态应为 EXE 位于 resources/backend，且项目根为其父级 resources。"
+            "无法检测项目根目录。请确保在项目根目录下运行，或设置环境变量 TAGTRAGGER_ROOT。"
         )
 
     def _detect_backend_root(self, project_root: Path) -> Path:
