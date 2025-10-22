@@ -19,36 +19,32 @@ def build_workspace_url(
     构建workspace URL（兼容云服务器和Electron）
 
     Args:
-        request: FastAPI Request对象 (用于获取当前请求的origin)
+        request: FastAPI Request对象（保留参数以兼容现有代码，但不再使用）
         relative_path: 相对workspace的路径 (如 "datasets/xxx/images/1.jpg")
-        fallback_origin: 兜底的origin,当request为None时使用（空字符串表示返回相对路径）
+        fallback_origin: 兜底的origin（保留参数以兼容现有代码，但不再使用）
 
     Returns:
-        完整URL或相对URL
-        - 有request时: "http://host:port/workspace/datasets/xxx/images/1.jpg"
-        - 无request时: "/workspace/datasets/xxx/images/1.jpg" (相对路径，兼容云服务器)
+        相对URL路径
+        - 始终返回: "/workspace/datasets/xxx/images/1.jpg"
+        - 浏览器会自动基于当前页面 origin 解析
+        - Vite 代理会转发 /workspace 到后端 8000 端口
+        - Electron 也能正常处理（前端 joinApiUrl 会处理）
 
     Examples:
         >>> build_workspace_url(request, "datasets/abc/images/1.jpg")
-        "http://127.0.0.1:8000/workspace/datasets/abc/images/1.jpg"
+        "/workspace/datasets/abc/images/1.jpg"
 
         >>> build_workspace_url(None, "datasets/abc/images/1.jpg")
         "/workspace/datasets/abc/images/1.jpg"
     """
     # 规范化相对路径:移除开头的斜杠
     rel = relative_path.lstrip('/')
-
-    # 优先使用request的origin（Electron 模式或有明确 request 时）
-    if request:
-        origin = f"{request.url.scheme}://{request.url.netloc}"
-        return f"{origin}/workspace/{rel}"
     
-    # 🔧 无 request 时：返回相对路径（兼容云服务器）
-    # 浏览器会自动基于当前页面 origin 解析，Vite 代理会转发到后端
-    if fallback_origin:
-        return f"{fallback_origin}/workspace/{rel}"
-    else:
-        return f"/workspace/{rel}"
+    # 🔧 始终返回相对路径（兼容所有部署场景）
+    # - 云服务器: 浏览器基于 http://服务器IP:6006 解析，Vite 代理转发到后端
+    # - 开发环境: 浏览器基于 http://localhost:5173 解析，Vite 代理转发到后端
+    # - Electron: 前端 joinApiUrl 会将相对路径转换为 http://127.0.0.1:动态端口
+    return f"/workspace/{rel}"
 
 
 def build_workspace_urls(

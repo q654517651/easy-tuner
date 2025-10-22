@@ -68,18 +68,25 @@ export const joinApiUrl = (u: string | URL | null | undefined): string => {
     
     const raw = typeof u === 'string' ? u : u.toString();
     
-    // 🔧 云服务器兼容：如果是以 / 开头的绝对路径且 origin 为空，直接返回
-    // 浏览器会自动基于当前页面 origin 解析
-    if (raw.startsWith('/') && (!origin || origin === '')) {
-      return raw;
-    }
-    
     // 若已是完整 URL（http://...），直接返回
     if (raw.startsWith('http://') || raw.startsWith('https://')) {
       return raw;
     }
     
-    // 否则拼接 origin
+    // 🔧 处理以 / 开头的绝对路径
+    if (raw.startsWith('/')) {
+      // Web 环境（云服务器或开发）：origin 为空，直接返回相对路径
+      // 浏览器会自动基于当前页面 origin 解析，Vite 代理会转发
+      if (!origin || origin === '') {
+        return raw;
+      }
+      
+      // Electron 环境：origin 不为空（如 http://127.0.0.1:8000）
+      // 需要拼接完整 URL
+      return `${origin}${raw}`;
+    }
+    
+    // 其他情况：使用 URL 构造函数拼接
     return new URL(raw, origin.replace(/\/+$/, '/') + '').toString();
   } catch {
     // 兜底：返回原始字符串
