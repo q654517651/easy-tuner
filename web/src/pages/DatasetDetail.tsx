@@ -584,7 +584,13 @@ export default function DatasetDetail() {
   const isFileDrag = (e: React.DragEvent) => {
     const dt = e.dataTransfer as DataTransfer;
     const types = Array.from(dt.types || []);
-    const hasFilesType = types.includes('Files');
+    
+    // 🔧 修复：不区分大小写检查（兼容 Electron 和浏览器）
+    // Electron 返回 'Files'（大写），浏览器返回 'files'（小写）
+    const hasFilesType = types.some(type => 
+      type.toLowerCase() === 'files'
+    );
+    
     // 只检查类型，不检查 files.length（在 dragOver/dragEnter 时为空，受浏览器安全限制）
     return hasFilesType;
   };
