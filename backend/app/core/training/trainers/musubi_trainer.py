@@ -114,7 +114,8 @@ class MusubiTrainer:
     # ✨ 直接使用绝对路径的 accelerate 命令（不再相对化）
     def _get_accelerate_cmd(self) -> List[str]:
         """返回 accelerate 命令（使用绝对路径，跨平台稳定）"""
-        return [str(self._python_exe.resolve()), "-m", self._ACCELERATE_MODULE]
+        # 🔧 不使用 .resolve() 以避免在 Linux venv 中解析符号链接
+        return [str(self._python_exe), "-m", self._ACCELERATE_MODULE]
 
     # 从任务配置类的 ClassVar 取 3 个脚本（相对项目根）
     def _scripts_for_task(self, task) -> dict:
@@ -353,7 +354,7 @@ class MusubiTrainer:
 
         # 固定参数（直接运行脚本文件，不使用 --module）
         cmd = [
-            str(self._python_exe.resolve()),
+            str(self._python_exe),  # 🔧 不使用 .resolve() 以避免在 Linux venv 中解析符号链接
             "-m",
             self._ACCELERATE_MODULE,
             ("--num_cpu_threads_per_process", "1"),
@@ -649,7 +650,7 @@ set "PYTHONIOENCODING=utf-8"
             )
 
             cache_cmd = [
-                str(self._python_exe.resolve()),
+                str(self._python_exe),  # 🔧 不使用 .resolve() 以避免在 Linux venv 中解析符号链接
                 "-c",
                 python_oneliner,
                 *step_args
@@ -657,6 +658,8 @@ set "PYTHONIOENCODING=utf-8"
 
             log_info(f"[缓存] 使用 runpy 方式执行: {module_name}")
             log_info(f"[缓存] Python路径注入: {musubi_src_path}")
+            log_info(f"[缓存] Python可执行文件: {self._python_exe}")
+            log_info(f"[缓存] 完整命令: {' '.join(cache_cmd)}")
 
             # 4. 环境变量（保留基础设置，不再依赖 PYTHONPATH）
             env = os.environ.copy()
