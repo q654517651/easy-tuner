@@ -65,8 +65,21 @@ export const joinApiUrl = (u: string | URL | null | undefined): string => {
   try {
     const origin = getApiOrigin();
     if (!u) return origin + "/";
-    // 若已是 URL 对象或绝对 URL，new URL 会原样返回；相对路径将基于 API_ORIGIN 拼接
+    
     const raw = typeof u === 'string' ? u : u.toString();
+    
+    // 🔧 云服务器兼容：如果是以 / 开头的绝对路径且 origin 为空，直接返回
+    // 浏览器会自动基于当前页面 origin 解析
+    if (raw.startsWith('/') && (!origin || origin === '')) {
+      return raw;
+    }
+    
+    // 若已是完整 URL（http://...），直接返回
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return raw;
+    }
+    
+    // 否则拼接 origin
     return new URL(raw, origin.replace(/\/+$/, '/') + '').toString();
   } catch {
     // 兜底：返回原始字符串

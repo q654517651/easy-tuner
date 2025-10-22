@@ -13,54 +13,59 @@ from fastapi import Request
 def build_workspace_url(
     request: Optional[Request],
     relative_path: str,
-    fallback_origin: str = "http://127.0.0.1:8000"
+    fallback_origin: str = ""
 ) -> str:
     """
-    构建完整的workspace URL
+    构建workspace URL（兼容云服务器和Electron）
 
     Args:
         request: FastAPI Request对象 (用于获取当前请求的origin)
         relative_path: 相对workspace的路径 (如 "datasets/xxx/images/1.jpg")
-        fallback_origin: 兜底的origin,当request为None时使用
+        fallback_origin: 兜底的origin,当request为None时使用（空字符串表示返回相对路径）
 
     Returns:
-        完整URL (如 "http://127.0.0.1:8000/workspace/datasets/xxx/images/1.jpg")
+        完整URL或相对URL
+        - 有request时: "http://host:port/workspace/datasets/xxx/images/1.jpg"
+        - 无request时: "/workspace/datasets/xxx/images/1.jpg" (相对路径，兼容云服务器)
 
     Examples:
         >>> build_workspace_url(request, "datasets/abc/images/1.jpg")
         "http://127.0.0.1:8000/workspace/datasets/abc/images/1.jpg"
 
         >>> build_workspace_url(None, "datasets/abc/images/1.jpg")
-        "http://127.0.0.1:8000/workspace/datasets/abc/images/1.jpg"
+        "/workspace/datasets/abc/images/1.jpg"
     """
     # 规范化相对路径:移除开头的斜杠
     rel = relative_path.lstrip('/')
 
-    # 优先使用request的origin
+    # 优先使用request的origin（Electron 模式或有明确 request 时）
     if request:
         origin = f"{request.url.scheme}://{request.url.netloc}"
+        return f"{origin}/workspace/{rel}"
+    
+    # 🔧 无 request 时：返回相对路径（兼容云服务器）
+    # 浏览器会自动基于当前页面 origin 解析，Vite 代理会转发到后端
+    if fallback_origin:
+        return f"{fallback_origin}/workspace/{rel}"
     else:
-        origin = fallback_origin
-
-    # 拼接完整URL
-    return f"{origin}/workspace/{rel}"
+        return f"/workspace/{rel}"
 
 
 def build_workspace_urls(
     request: Optional[Request],
     relative_paths: list[str],
-    fallback_origin: str = "http://127.0.0.1:8000"
+    fallback_origin: str = ""
 ) -> list[str]:
     """
-    批量构建workspace URLs
+    批量构建workspace URLs（兼容云服务器和Electron）
 
     Args:
         request: FastAPI Request对象
         relative_paths: 相对路径列表
-        fallback_origin: 兜底的origin
+        fallback_origin: 兜底的origin（空字符串表示返回相对路径）
 
     Returns:
-        完整URL列表
+        完整URL或相对URL列表
     """
     return [build_workspace_url(request, path, fallback_origin) for path in relative_paths]
 
