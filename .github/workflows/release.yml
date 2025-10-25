@@ -58,7 +58,7 @@ jobs:
             exit 1
           }
           
-          Write-Host "✓ Backend built: dist\EasyTunerBackend.exe"
+          Write-Host "[OK] Backend built: dist\EasyTunerBackend.exe"
         shell: powershell
 
       - name: 设置 Node.js
@@ -96,7 +96,7 @@ jobs:
             exit 1
           }
           
-          Write-Host "✓ Build completed"
+          Write-Host "[OK] Build completed"
           Get-ChildItem dist\*.exe, dist\*.blockmap, dist\latest.yml | Format-Table Name, Length
         shell: powershell
 
