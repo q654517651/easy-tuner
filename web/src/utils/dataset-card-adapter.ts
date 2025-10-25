@@ -72,7 +72,16 @@ export function convertToDatasetCardProps(
       mediaType: 'single_control_image' as const,
       controlImages: item.control_images || [],
       onUploadControl: (index: 1) => handleUploadControl(item.filename, index - 1),
-      onDeleteControl: (index: 1) => handleDeleteControl(item.filename, index - 1)
+      onDeleteControl: (index: 1) => {
+        // 从控制图数组中获取实际文件名，然后提取索引
+        const controlImage = item.control_images?.[index - 1];
+        if (controlImage?.filename) {
+          // 从文件名中提取索引：image1_0.jpg -> 0
+          const match = controlImage.filename.match(/_(\d+)\./);
+          const actualIndex = match ? parseInt(match[1]) : index - 1;
+          handleDeleteControl(item.filename, actualIndex);
+        }
+      }
     };
   } else if (dataset?.type === 'multi_control_image') {
     return {
@@ -80,7 +89,16 @@ export function convertToDatasetCardProps(
       mediaType: 'multi_control_image' as const,
       controlImages: item.control_images || [],
       onUploadControl: (index: 1 | 2 | 3) => handleUploadControl(item.filename, index - 1),
-      onDeleteControl: (index: 1 | 2 | 3) => handleDeleteControl(item.filename, index - 1)
+      onDeleteControl: (index: 1 | 2 | 3) => {
+        // 从控制图数组中获取实际文件名，然后提取索引
+        const controlImage = item.control_images?.[index - 1];
+        if (controlImage?.filename) {
+          // 从文件名中提取索引：image1_0.jpg -> 0
+          const match = controlImage.filename.match(/_(\d+)\./);
+          const actualIndex = match ? parseInt(match[1]) : index - 1;
+          handleDeleteControl(item.filename, actualIndex);
+        }
+      }
     };
   } else if (dataset?.type === 'video' || isVideoFile(item.filename)) {
     return {

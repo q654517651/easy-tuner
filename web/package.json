@@ -23,6 +23,7 @@
     "@heroui/react": "^2.8.4",
     "@heroui/toast": "^2.0.16",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.6.2",
     "framer-motion": "^12.23.13",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
@@ -60,6 +61,14 @@
   "build": {
     "appId": "com.easytuner.app",
     "productName": "EasyTuner",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "q654517651",
+        "repo": "easy-tuner",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "dist/**",
       "dist-electron/**"
@@ -71,18 +80,25 @@
     "icon": "src/assets/app_icon/AppIcon.png",
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "icon": "src/assets/app_icon/AppIcon.png"
+      "icon": "src/assets/app_icon/AppIcon.png",
+      "publisherName": "EasyTuner Team"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": true,
+      "perMachine": false,
+      "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "EasyTuner"
+      "shortcutName": "EasyTuner",
+      "differentialPackage": true
     },
     "mac": {
       "target": [
@@ -107,7 +123,9 @@
       {
         "from": "../backend/scripts",
         "to": "backend/scripts",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   }

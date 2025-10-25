@@ -36,6 +36,34 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.invoke("open-folder", { folderPath }) as Promise<{ ok: boolean; error?: string }>,
   // 选择工作区目录
   selectWorkspace: () => ipcRenderer.invoke('system:selectWorkspaceDialog') as Promise<{ canceled: boolean; path: string }>,
+  
+  // 更新相关 API
+  updater: {
+    checkForUpdates: () => ipcRenderer.invoke('updater:check-for-updates'),
+    downloadUpdate: () => ipcRenderer.invoke('updater:download-update'),
+    quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
+  },
+  
+  // 更新事件监听
+  on: (channel: string, callback: (...args: any[]) => void) => {
+    const validChannels = [
+      'updater:checking-for-update',
+      'updater:update-available',
+      'updater:update-not-available',
+      'updater:download-progress',
+      'updater:update-downloaded',
+      'updater:error',
+      'backend:ready',
+      'win:maximize-changed'
+    ];
+    if (validChannels.includes(channel)) {
+      ipcRenderer.on(channel, (_event, ...args) => callback(...args));
+    }
+  },
+  
+  removeAllListeners: (channel: string) => {
+    ipcRenderer.removeAllListeners(channel);
+  }
 });
 
 // ElectronAPI（统一接口，供前端使用）

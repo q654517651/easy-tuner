@@ -283,6 +283,18 @@ class DatasetService:
             log_error(f"获取数据集标签统计失败: {dataset_id}", e)
             return None
 
+    def _extract_control_index(self, filename: str) -> int:
+        """从控制图文件名中提取索引数字
+        
+        例如: image1_0.jpg -> 0, image1_1.jpg -> 1
+        如果无法提取，返回较大的数字以排在最后
+        """
+        import re
+        match = re.search(r'_(\d+)\.\w+$', filename)
+        if match:
+            return int(match.group(1))
+        return 999  # 无法提取索引的文件排在最后
+    
     def _format_control_images(self, dataset_id: str, control_image_filenames: List[str], request: Optional[Request] = None) -> Optional[List[Any]]:
         """格式化已有的控制图信息"""
         from ..models.dataset import ControlImage
@@ -336,7 +348,8 @@ class DatasetService:
                     thumbnail_url=control_url  # 不再使用缩略图
                 ))
 
-            control_images.sort(key=lambda x: x.filename)
+            # 按文件名中的索引数字排序（image1_0.jpg, image1_1.jpg, image1_2.jpg）
+            control_images.sort(key=lambda x: self._extract_control_index(x.filename))
             return control_images if control_images else None
 
         except Exception as e:
@@ -405,8 +418,8 @@ class DatasetService:
                         thumbnail_url=control_url  # 不再使用缩略图
                     ))
 
-            # 按文件名排序，确保显示顺序一致
-            control_images.sort(key=lambda x: x.filename)
+            # 按文件名中的索引数字排序（image1_0.jpg, image1_1.jpg, image1_2.jpg）
+            control_images.sort(key=lambda x: self._extract_control_index(x.filename))
 
             return control_images if control_images else None
 

@@ -17,11 +17,12 @@ import psutil
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List
 
-from ....utils.logger import log_info, log_error, log_success, log_progress
+from ....utils.logger import log_info, log_error, log_success, log_progress, log_warning
 from ....utils.log_sink import LogSink
 from ....core.exceptions import TrainingError
 from ....utils.network_retry import NetworkRetryHelper
 from ...config import get_config
+from ...dataset.models import DatasetType
 from ..models import BaseTrainingConfig, TrainingTask, TrainingState, get_model, list_models, build_cli_args, \
     build_toml_dict, dumps_toml
 
@@ -211,15 +212,20 @@ class MusubiTrainer:
     def _create_dataset_config(self, task, preview_mode: bool = False) -> str:
         """
         使用注册表元数据 + Trainer 注入的每数据集覆盖项，生成 dataset.toml
-        - image_directory / cache_directory 在此注入；
+        - image_directory / video_directory / cache_directory / control_directory 在此注入；
         - 其它键（resolution/batch_size/enable_bucket/num_repeats/caption_extension 等）
           由 models.py 的 build_toml_dict 从 config 元数据里自动写入。
         """
         # 1) 计算数据集路径（预览模式可跳过严格校验）
         if preview_mode:
-            dataset_path = Path(self.config.storage.workspace_root) / "datasets" / (task.dataset_id or "preview") / "original"
+            # 预览模式：返回占位路径（假设是images目录）
+            dataset_path = Path(self.config.storage.workspace_root) / "datasets" / (task.dataset_id or "preview") / "images"
+            dataset_type = None
         else:
             dataset_path = self._resolve_dataset_path(task.dataset_id)
+            # 从数据集目录名提取类型信息
+            dataset_type = self._detect_dataset_type(task.dataset_id)
+            log_info(f"检测到数据集类型: {dataset_type}")
 
         if preview_mode:
             # 预览模式：使用虚拟路径，不创建实际目录
@@ -233,15 +239,41 @@ class MusubiTrainer:
             # 确保目录存在（虽然应该已经由TrainingManager创建）
             cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # 3) 设置数据集和缓存路径到配置中
-        task.config.image_video_directory = self._rel_to_root_posix(dataset_path)
-        task.config.cache_directory = self._rel_to_root_posix(cache_dir)
+        # 3) 设置数据集和缓存路径到配置中 - 使用绝对路径
+        # 根据数据集类型设置相应的目录字段
+        if dataset_type == DatasetType.VIDEO.value:
+            # 视频数据集：使用 video_directory
+            task.config.video_directory = str(dataset_path.resolve())
+            task.config.image_video_directory = ""  # 清空 image_directory
+            log_info(f"视频数据集路径 (video_directory): {task.config.video_directory}")
+        else:
+            # 图像数据集：使用 image_directory
+            task.config.image_video_directory = str(dataset_path.resolve())
+            task.config.video_directory = ""  # 清空 video_directory
+            log_info(f"图像数据集路径 (image_directory): {task.config.image_video_directory}")
+        
+        task.config.cache_directory = str(cache_dir.resolve())
+        log_info(f"缓存目录路径 (cache_directory): {task.config.cache_directory}")
+        
+        # 4) 如果是控制图数据集，设置 control_directory
+        if dataset_type in [DatasetType.SINGLE_CONTROL_IMAGE.value, DatasetType.MULTI_CONTROL_IMAGE.value]:
+            # 控制图目录与原图目录同级
+            controls_dir = dataset_path.parent / "controls"
+            if controls_dir.exists():
+                task.config.control_directory = str(controls_dir.resolve())
+                log_info(f"控制图目录路径 (control_directory): {task.config.control_directory}")
+            else:
+                log_warning(f"控制图目录不存在: {controls_dir}")
+                task.config.control_directory = ""
+        else:
+            # 非控制图数据集，清空 control_directory
+            task.config.control_directory = ""
 
-        # 4) 生成 TOML 内容
+        # 5) 生成 TOML 内容
         toml_dict = build_toml_dict(task.config)
         toml_content = dumps_toml(toml_dict)
 
-        # 5) 落盘并返回相对路径（供训练脚本 --dataset_config 使用）
+        # 6) 落盘并返回相对路径（供训练脚本 --dataset_config 使用）
         toml_path = training_dir / "dataset.toml"
         if not preview_mode:
             # 只有非预览模式才写入文件
@@ -252,9 +284,9 @@ class MusubiTrainer:
         """解析数据集路径（支持预览模式）"""
 
         if preview_mode:
-            # 预览模式：返回占位路径，避免任何依赖导入
+            # 预览模式：返回占位路径，避免任何依赖导入（假设是images目录）
             base = Path(self.config.storage.workspace_root) / "datasets" / (dataset_id or "preview")
-            return base / "original"
+            return base / "images"
 
         # 训练模式：按照实际的数据集目录结构查找
         workspace_root = Path(self.config.storage.workspace_root)
@@ -283,7 +315,8 @@ class MusubiTrainer:
             raise FileNotFoundError(f"数据集目录不存在: 未找到ID为 {dataset_id} 的数据集")
 
         # 在数据集目录下查找包含图像的子目录
-        candidates = [dataset_path / "images", dataset_path / "original", dataset_path]
+        # 支持：images/（普通图像数据集）、targets/（控制图数据集的原图）、根目录
+        candidates = [dataset_path / "images", dataset_path / "targets", dataset_path]
         exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff"}
 
         for p in candidates:
@@ -292,8 +325,39 @@ class MusubiTrainer:
                 if any(f.is_file() and f.suffix.lower() in exts for f in p.glob("*")):
                     return p
 
-        raise ValueError(f"在 {dataset_path} 下没有找到图像文件。请将图像放入 'images/' 或 'original/' 目录中。")
+        raise ValueError(
+            f"在 {dataset_path} 下没有找到图像文件。"
+            f"请将图像放入 'images/'（普通数据集）或 'targets/'（控制图数据集）目录中。"
+        )
 
+    def _detect_dataset_type(self, dataset_id: str) -> Optional[str]:
+        """检测数据集类型（从目录名推断）
+        
+        Returns:
+            数据集类型字符串，如 'single_control_image', 'multi_control_image', 'image', 'video'
+            如果无法确定则返回 None
+        """
+        workspace_root = Path(self.config.storage.workspace_root)
+        search_dirs = [
+            workspace_root / "datasets" / "image_datasets",
+            workspace_root / "datasets" / "control_image_datasets",
+            workspace_root / "datasets" / "video_datasets",
+            workspace_root / "datasets"
+        ]
+        
+        for search_dir in search_dirs:
+            if not search_dir.exists():
+                continue
+            for dir_path in search_dir.iterdir():
+                if dir_path.is_dir():
+                    if (dir_path.name.startswith(f"{dataset_id}--") or
+                        dir_path.name.startswith(f"{dataset_id}__")):
+                        # 从目录名提取类型标签
+                        from ...dataset.utils import parse_unified_dataset_dirname
+                        _, dtype, _, _ = parse_unified_dataset_dirname(dir_path.name)
+                        return dtype
+        
+        return None
 
     def _build_dynamic_args(self, config: BaseTrainingConfig, preview_mode: bool = False) -> List[str]:
         """使用新的CLI参数生成系统构建命令行参数"""

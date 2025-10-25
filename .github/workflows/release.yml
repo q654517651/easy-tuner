@@ -1,0 +1,115 @@
+name: Release App
+
+on:
+  push:
+    tags:
+      - 'v*'  # 推送 v 开头的标签时触发
+
+jobs:
+  release:
+    runs-on: windows-latest
+    
+    permissions:
+      contents: write  # 需要写权限来创建 Release
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: 创建 Python 虚拟环境
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+        shell: powershell
+
+      - name: 安装 Python 依赖
+        run: |
+          .\.venv\Scripts\Activate.ps1
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+        shell: powershell
+
+      - name: 构建后端 (PyInstaller)
+        run: |
+          .\.venv\Scripts\Activate.ps1
+          cd backend
+          if (Test-Path build) { Remove-Item build -Recurse -Force }
+          if (Test-Path dist)  { Remove-Item dist  -Recurse -Force }
+          if (Test-Path EasyTunerBackend.spec) { Remove-Item EasyTunerBackend.spec -Force }
+          
+          python -m PyInstaller `
+            --noconfirm --clean `
+            --name EasyTunerBackend `
+            --onefile --console `
+            --paths . `
+            --collect-submodules app `
+            --collect-submodules google.protobuf `
+            --hidden-import google.protobuf.internal `
+            serve.py
+          
+          if (-not (Test-Path "dist\EasyTunerBackend.exe")) {
+            Write-Error "Backend build failed: EXE not found"
+            exit 1
+          }
+          
+          Write-Host "✓ Backend built: dist\EasyTunerBackend.exe"
+        shell: powershell
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: 安装前端依赖
+        working-directory: ./web
+        run: pnpm install
+
+      - name: 构建前端并打包 Electron
+        working-directory: ./web
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 检查后端 EXE 是否存在
+          $backendExe = "..\backend\dist\EasyTunerBackend.exe"
+          if (-not (Test-Path $backendExe)) {
+            Write-Error "Backend EXE not found: $backendExe"
+            exit 1
+          }
+          
+          # 构建并打包
+          pnpm dist
+          
+          # 检查构建产物
+          if (-not (Test-Path "dist")) {
+            Write-Error "Frontend dist not found"
+            exit 1
+          }
+          
+          Write-Host "✓ Build completed"
+          Get-ChildItem dist\*.exe, dist\*.blockmap, dist\latest.yml | Format-Table Name, Length
+        shell: powershell
+
+      - name: 上传构建产物到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            web/dist/*.exe
+            web/dist/*.blockmap
+            web/dist/latest.yml
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

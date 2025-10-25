@@ -412,7 +412,10 @@ export default function DatasetDetail() {
             filename: item.filename,
             url: joinApiUrl(item.url),
             caption: item.caption || "",
-            control_images: item.control_images
+            control_images: (item.control_images ?? []).map((ctrl: any) => ({
+              ...ctrl,
+              url: joinApiUrl(ctrl.url)
+            }))
           }));
           setItems(mediaItems);
         }
@@ -457,7 +460,10 @@ export default function DatasetDetail() {
           filename: item.filename,
           url: joinApiUrl(item.url),
           caption: item.caption || "",
-          control_images: item.control_images
+          control_images: (item.control_images ?? []).map((ctrl: any) => ({
+            ...ctrl,
+            url: joinApiUrl(ctrl.url)
+          }))
         }));
         setItems(mediaItems);
       }
@@ -870,7 +876,10 @@ export default function DatasetDetail() {
                               file_path: item.file_path,
                               url: joinApiUrl(item.url),
                               caption: item.caption || "",
-                              control_images: item.control_images
+                              control_images: (item.control_images ?? []).map((ctrl: any) => ({
+                                ...ctrl,
+                                url: joinApiUrl(ctrl.url)
+                              }))
                             }));
                             setItems(mediaItems);
                           }

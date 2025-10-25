@@ -107,6 +107,33 @@ class BaseTrainingConfig:
         }
     )
 
+    control_directory: str = field(
+        default="",
+        metadata={
+            "target": "toml",
+            "toml": {
+                "section": "datasets",
+                "key": "control_directory",
+                "formatter": "str"
+            },
+            "ui_hidden": False, "persist": True
+        }
+    )
+
+    # 视频数据集专用字段（与 image_video_directory 互斥）
+    video_directory: str = field(
+        default="",
+        metadata={
+            "target": "toml",
+            "toml": {
+                "section": "datasets",
+                "key": "video_directory",
+                "formatter": "str"
+            },
+            "ui_hidden": False, "persist": True
+        }
+    )
+
     # ================================
     # 2. 基础设置（Training Core）
     # ================================
@@ -689,7 +716,7 @@ class QwenImageConfig(BaseTrainingConfig):
 
 
 @dataclass
-class QwenImageEditConfig(BaseTrainingConfig):
+class QwenImageEdit2509Config(BaseTrainingConfig):
     """Qwen-Image LoRA训练配置"""
 
     dit_path: str = field(
@@ -698,7 +725,7 @@ class QwenImageEditConfig(BaseTrainingConfig):
             "group": ParameterGroup.PATH.key,
             "label": "DiT 模型路径",
             "widget": "file_picker",
-            "help": "Qwen-Image Edit模型文件路径",
+            "help": "Qwen-Image Edit2509模型文件路径",
             "cli": {"name": "--dit", "type": "value", "formatter": "path"},
             "ui_hidden": False, "persist": True
         }
@@ -730,11 +757,11 @@ class QwenImageEditConfig(BaseTrainingConfig):
         default=True,
         metadata={
             "group": ParameterGroup.PRECISION.key,
-            "label": "启用 FP8 Base",
+            "label": "2509配置",
             "widget": "switch",
-            "help": "启用 FP8 base 算法以减少显存占用。",
+            "help": "2509配置",
             "target": "cli",
-            "cli": {"type": "toggle_true", "name": "--edit", "emit_if_default": False}
+            "cli": {"type": "toggle_true", "name": "--edit_plus", "emit_if_default": False}
         }
     )
 
@@ -1140,7 +1167,8 @@ def build_toml_dict(config: Any, datasets: Optional[List[Dict[str, Any]]] = None
         fmt = tinfo.get("formatter")
         val = getattr(config, f.name, None)
         val = _apply_formatter(val, fmt)
-        if val is None:
+        # 跳过 None 和空字符串
+        if val is None or (isinstance(val, str) and val == ""):
             continue
         toml["general"][key] = val
 
@@ -1158,7 +1186,8 @@ def build_toml_dict(config: Any, datasets: Optional[List[Dict[str, Any]]] = None
         fmt = tinfo.get("formatter")
         val = getattr(config, f.name, None)
         val = _apply_formatter(val, fmt)
-        if val is None:
+        # 跳过 None 和空字符串（避免在 TOML 中写入无用的空值字段）
+        if val is None or (isinstance(val, str) and val == ""):
             continue
         dataset_item[key] = val
 
@@ -1265,9 +1294,9 @@ register_model(ModelSpec(
 ))
 
 register_model(ModelSpec(
-    type_name="qwen_image_edit_lora",
-    title="Qwen-Image Edit LoRA",
-    config_cls=QwenImageEditConfig,
+    type_name="qwen_image_edit2095_lora",
+    title="Qwen-Image Edit 2095 LoRA",
+    config_cls=QwenImageEdit2509Config,
     script_train="qwen_image_train_network.py",
     network_module="musubi_tuner.networks.lora_qwen_image",
     group_order=[
@@ -1290,17 +1319,19 @@ register_model(ModelSpec(
             script="qwen_image_cache_text_encoder_outputs.py",
             args_template=["--dataset_config", "{dataset_toml}",
                            "--text_encoder", "{text_encoder_path}",
+                           "--edit_plus",
                            "--batch_size", "1"]
         ),
         CacheStep(
             name="cache_latents",
             script="qwen_image_cache_latents.py",
             args_template=["--dataset_config", "{dataset_toml}",
+                           "--edit_plus",
                            "--vae", "{vae_path}"]
         ),
     ],
     features={},
-    supported_dataset_types=[DatasetType.IMAGE, DatasetType.SINGLE_CONTROL_IMAGE]
+    supported_dataset_types=[DatasetType.IMAGE, DatasetType.SINGLE_CONTROL_IMAGE, DatasetType.MULTI_CONTROL_IMAGE]
 ))
 
 register_model(ModelSpec(

@@ -5,6 +5,7 @@ import Sidebar from "../ui/Sidebar";
 import TitleBarControls from "../components/TitleBarControls";
 import StartupGuard from "../components/StartupGuard";
 import BackendLoader from "../components/BackendLoader";
+import { UpdateNotification } from "../components/UpdateNotification";
 
 export default function AppShell() {
   const isElectron = useIsElectron();
@@ -40,6 +41,9 @@ export default function AppShell() {
           <Outlet />
         </main>
       </div>
+
+      {/* Electron 自动更新通知 */}
+      {isElectron && <UpdateNotification />}
     </div>
   );
 }
