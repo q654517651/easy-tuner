@@ -87,8 +87,7 @@
           ]
         }
       ],
-      "icon": "src/assets/app_icon/AppIcon.png",
-      "publisherName": "EasyTuner Team"
+      "icon": "src/assets/app_icon/AppIcon.png"
     },
     "nsis": {
       "oneClick": false,
