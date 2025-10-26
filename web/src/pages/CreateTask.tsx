@@ -41,7 +41,7 @@
  * -----------------------------------------------------------------------------
  */
 
-import React, { useEffect, useMemo, useRef, useState, startTransition } from "react";
+import { useEffect, useMemo, useRef, useState, startTransition } from "react";
 
 // 工具函数：基于getBoundingClientRect计算准确的滚动目标位置
 function topIn(container: HTMLElement, el: HTMLElement, extra = 0) {
@@ -58,7 +58,6 @@ import {
   HeroSwitch,
   HeroTextarea,
   HERO_RESOLUTION_OPTIONS,
-  convertToHeroOptions,
   type SelectOption
 } from "../ui/HeroFormControls";
 import GroupCard from "../ui/GroupCard";
@@ -66,6 +65,26 @@ import { trainingApi, API_BASE_URL } from "../services/api";
 // import { BigInput, BigSelect, SwitchTile } from "../ui/Input";
 
 /* ========= 类型定义 ========= */
+// FieldMeta 类型定义（基于注释中的协议规范）
+type FieldMeta = {
+  label?: string;
+  group?: string;
+  widget?: "text" | "textarea" | "number" | "select" | "checkbox" | "path" | "multiselect";
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  enum?: SelectOption[];
+  enable_if?: Record<string, any> | Array<[string, any]>;
+  cli?: {
+    flag?: string;
+    fmt?: string;
+    fmt_args?: string[];
+    skip_if_empty?: boolean;
+  };
+  [key: string]: unknown; // 兜底，避免少字段报错
+};
+
 // EnumItem类型已由SelectOption替代
 type EnableCond =
   | any
@@ -121,7 +140,6 @@ type TrainingConfigSchema = {
 };
 
 // 兼容性类型 (旧的前端代码使用)
-type FieldSpec = { name: string; default: any; meta?: any };
 type ModelSpec = TrainingConfigSchema;
 
 type ModelSummary = {
@@ -181,12 +199,6 @@ function enabledBy(meta: FieldMeta | undefined, values: Record<string, any>): bo
   
   return true;
 }
-function template(fmt: string, dict: Record<string, any>): string {
-  return fmt.replace(/\{(\w+)\}/g, (_, k) => {
-    const v = dict[k];
-    return v === undefined || v === null ? "" : String(v);
-  });
-}
 // buildCliArgs 函数已删除，现在使用后端API预览
 
 /* ========= UI 基元 ========= */
@@ -196,7 +208,7 @@ export default function CreateTask() {
   const [models, setModels] = useState<ModelSummary[]>(_modelsCache ?? []);
   const [typeName, setTypeName] = useState<string>("");
   const [model, setModel] = useState<ModelSpec | null>(null);
-  const [modelLoading, setModelLoading] = useState<boolean>(false);
+  const [_modelLoading, setModelLoading] = useState<boolean>(false);
   const modelReqIdRef = useRef(0);
   const [values, setValues] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
@@ -419,7 +431,7 @@ export default function CreateTask() {
   }, []);
 
   // 预览数据状态
-  const [previewData, setPreviewData] = useState<{
+  const [_previewData, setPreviewData] = useState<{
     command?: string;
     toml_content?: string;
     toml_path?: string;
@@ -505,7 +517,6 @@ export default function CreateTask() {
     return formatted;
   }, [displayPreview, previewLoading]);
 
-  const groups = model?.model_spec?.group_order ?? [];
   const visible = (f: TrainingField) => (model ? enabledBy({ enable_if: f.enable_if }, values) : false);
 
   const submitTask = async () => {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { Tabs, Tab, CircularProgress, addToast, Skeleton, Input } from "@heroui/react";
+import { useParams } from "react-router-dom";
+import { Tabs, Tab, CircularProgress, addToast, Input } from "@heroui/react";
 import HeaderBar from "../ui/HeaderBar";
 import { DatasetCard } from "../ui/dataset-card";
 import { CropCard } from "../ui/dataset-card/CropCard";
@@ -11,7 +11,6 @@ import TagManager from "../components/TagManager";
 import { datasetApi, labelingApi, imagesApi, joinApiUrl, API_BASE_URL } from "../services/api";
 import EmptyState from "../ui/EmptyState";
 import EmptyImg from "../assets/img/EmptyDataset.png?inline";
-import { PageLayout } from "../layouts/PageLayout";
 
 interface MediaItem {
   id: string;
@@ -24,6 +23,19 @@ interface MediaItem {
     filename: string;
   }[];
 }
+
+// 统一的归一化函数：将后端数据转换为 MediaItem
+const toMediaItem = (item: any): MediaItem => ({
+  id: item.id ?? crypto.randomUUID(),
+  filename: item.filename ?? '',
+  file_path: item.file_path ?? item.url ?? '',
+  url: joinApiUrl(item.url ?? ''),
+  caption: item.caption ?? '',
+  control_images: (item.control_images ?? []).map((ctrl: any) => ({
+    ...ctrl,
+    url: joinApiUrl(ctrl.url ?? ''),
+  })),
+});
 
 interface Dataset {
   id: string;
@@ -44,7 +56,6 @@ export default function DatasetDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [dragDepth, setDragDepth] = useState(0);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [batchLabeling, setBatchLabeling] = useState(false);
   const [labelingItems, setLabelingItems] = useState<Set<string>>(new Set());
@@ -85,17 +96,7 @@ export default function DatasetDetail() {
         if (data) {
           setDataset(data);
           // 转换媒体文件格式
-          const mediaItems = (data.media_items ?? []).map((item: any) => ({
-            id: item.id,
-            filename: item.filename,
-            file_path: item.file_path,
-            url: joinApiUrl(item.url),
-            caption: item.caption ?? "",
-            control_images: (item.control_images ?? []).map((ctrl: any) => ({
-              ...ctrl,
-              url: joinApiUrl(ctrl.url)
-            }))
-          }));
+          const mediaItems = (data.media_items ?? []).map(toMediaItem);
           setItems(mediaItems);
         }
         setError(null);
@@ -189,7 +190,7 @@ export default function DatasetDetail() {
     try {
       const result = await labelingApi.labelSingle(id, item.filename);
       // 从响应数据中提取caption
-      const caption = result.data?.caption || result.caption || "";
+      const caption = result.caption ?? "";
 
       // 更新items中的caption
       setItems((prev) => prev.map((x) => (x.id === rid ? { ...x, caption } : x)));
@@ -318,11 +319,8 @@ export default function DatasetDetail() {
             setDataset(data as any);
             const v = Date.now();
             const mediaItems = (data.media_items ?? []).map((item: any) => ({
-              id: item.id,
-              filename: item.filename,
-              file_path: item.file_path,
+              ...toMediaItem(item),
               url: `${joinApiUrl(item.url)}?v=${v}`,
-              caption: item.caption ?? '',
               control_images: (item.control_images ?? []).map((ctrl: any) => ({
                 ...ctrl,
                 url: `${joinApiUrl(ctrl.url)}?v=${v}`,
@@ -407,17 +405,7 @@ export default function DatasetDetail() {
         if (updatedDataset) {
           setDataset(updatedDataset);
           // 更新媒体文件列表
-          const mediaItems = updatedDataset.media_items.map(item => ({
-            id: item.id,
-            filename: item.filename,
-            url: joinApiUrl(item.url),
-            caption: item.caption || "",
-            control_images: (item.control_images ?? []).map((ctrl: any) => ({
-              ...ctrl,
-              url: joinApiUrl(ctrl.url)
-            }))
-          }));
-          setItems(mediaItems);
+          setItems(updatedDataset.media_items.map(toMediaItem));
         }
 
         addToast({
@@ -455,17 +443,7 @@ export default function DatasetDetail() {
       if (updatedDataset) {
         setDataset(updatedDataset);
         // 更新媒体文件列表
-        const mediaItems = updatedDataset.media_items.map(item => ({
-          id: item.id,
-          filename: item.filename,
-          url: joinApiUrl(item.url),
-          caption: item.caption || "",
-          control_images: (item.control_images ?? []).map((ctrl: any) => ({
-            ...ctrl,
-            url: joinApiUrl(ctrl.url)
-          }))
-        }));
-        setItems(mediaItems);
+        setItems(updatedDataset.media_items.map(toMediaItem));
       }
 
       addToast({
@@ -606,7 +584,6 @@ export default function DatasetDetail() {
     if (!isFileDrag(e)) return;
 
     e.preventDefault();
-    setDragDepth(0);
     setDragging(false);
 
     const fileList = Array.from(e.dataTransfer.files);
@@ -697,17 +674,7 @@ export default function DatasetDetail() {
         const updatedDataset = await datasetApi.getDataset(id);
         if (updatedDataset) {
           setDataset(updatedDataset);
-          const mediaItems = updatedDataset.media_items.map(item => ({
-            id: item.id,
-            filename: item.filename,
-            url: joinApiUrl(item.url),
-            caption: item.caption || "",
-            control_images: (item.control_images ?? []).map((ctrl: any) => ({
-              ...ctrl,
-              url: joinApiUrl(ctrl.url)
-            }))
-          }));
-          setItems(mediaItems);
+          setItems(updatedDataset.media_items.map(toMediaItem));
         }
 
         // 显示上传结果
@@ -778,14 +745,7 @@ export default function DatasetDetail() {
           const updatedDataset = await datasetApi.getDataset(id);
           if (updatedDataset) {
             setDataset(updatedDataset);
-            const mediaItems = updatedDataset.media_items.map(item => ({
-              id: item.id,
-              filename: item.filename,
-              url: joinApiUrl(item.url),
-              caption: item.caption || "",
-              control_images: item.control_images
-            }));
-            setItems(mediaItems);
+            setItems(updatedDataset.media_items.map(toMediaItem));
           }
         }
 
@@ -838,11 +798,7 @@ export default function DatasetDetail() {
         if (!isFileDrag(e)) return;
 
         e.preventDefault();
-        setDragDepth((d) => {
-          const nd = d + 1;
-          if (nd === 1) setDragging(true);
-          return nd;
-        });
+        setDragging(true);
       }}
       onDragOver={(e) => {
         // 只处理文件拖拽，忽略内部标签拖拽
@@ -855,11 +811,7 @@ export default function DatasetDetail() {
         if (!isFileDrag(e)) return;
 
         e.preventDefault();
-        setDragDepth((d) => {
-          const nd = Math.max(0, d - 1);
-          if (nd === 0) setDragging(false);
-          return nd;
-        });
+        setDragging(false);
       }}
       onDrop={handleDrop}
     >
@@ -1034,18 +986,7 @@ export default function DatasetDetail() {
                           const data = await datasetApi.getDataset(id!);
                           if (data) {
                             setDataset(data);
-                            const mediaItems = data.media_items.map(item => ({
-                              id: item.id,
-                              filename: item.filename,
-                              file_path: item.file_path,
-                              url: joinApiUrl(item.url),
-                              caption: item.caption || "",
-                              control_images: (item.control_images ?? []).map((ctrl: any) => ({
-                                ...ctrl,
-                                url: joinApiUrl(ctrl.url)
-                              }))
-                            }));
-                            setItems(mediaItems);
+                            setItems(data.media_items.map(toMediaItem));
                           }
                         } catch (err) {
                           console.error('刷新数据集失败:', err);
@@ -1140,7 +1081,7 @@ export default function DatasetDetail() {
         title="确认裁剪"
         footer={
           <div className="flex gap-2">
-            <AppButton kind="outline" onPress={() => setShowCropConfirm(false)}>取消</AppButton>
+            <AppButton kind="outlined" onPress={() => setShowCropConfirm(false)}>取消</AppButton>
             <AppButton kind="filled" color="primary" onPress={performCrop}>确认覆盖</AppButton>
           </div>
         }
