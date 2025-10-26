@@ -97,7 +97,7 @@ jobs:
           }
           
           Write-Host "[OK] Build completed"
-          Get-ChildItem dist\*.exe, dist\*.blockmap, dist\latest.yml | Format-Table Name, Length
+          Get-ChildItem dist\*.exe, dist\*.blockmap, dist\*.zip, dist\latest.yml | Format-Table Name, Length
         shell: powershell
 
       - name: 上传构建产物到 Release
@@ -106,6 +106,7 @@ jobs:
           files: |
             web/dist/*.exe
             web/dist/*.blockmap
+            web/dist/*.zip
             web/dist/latest.yml
           draft: false
           prerelease: false

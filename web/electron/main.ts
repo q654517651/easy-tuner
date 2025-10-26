@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeTheme, shell, nativeImage, dialog} from "electron";
-import { autoUpdater } from "electron-updater";
+import updater from "electron-updater";
 import { spawn, exec } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import treeKill from "tree-kill";
 
+const { autoUpdater } = updater;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
