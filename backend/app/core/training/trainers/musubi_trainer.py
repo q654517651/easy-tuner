@@ -1210,14 +1210,17 @@ set "PYTHONIOENCODING=utf-8"
 
                     # 统一写入与广播
                     if log_sink is not None:
+                        # 使用 LogSink 时，所有日志通过其批量推送机制处理（已包含去重）
                         log_sink.write_line(line, phase='train')
                     else:
+                        # 不使用 LogSink 时，使用传统的文件写入和事件推送
                         if log_file:
                             log_file.write(output)
                             log_file.flush()
                         self._emit_log(line)
-                    if log_callback:
-                        log_callback(line)
+                        # 只在不使用 log_sink 时才调用 callback（避免重复推送）
+                        if log_callback:
+                            log_callback(line)
 
                     # 收集可能的错误信息
                     if self._network_retry._is_network_error(line):

@@ -30,32 +30,6 @@ def gen_short_id(k: int = 8) -> str:
     return ''.join(random.choices(chars, k=k))
 
 
-def sanitize_name(name: str, max_len: int = 60) -> str:
-    """安全化名称
-    
-    Args:
-        name: 原始名称
-        max_len: 最大长度限制
-        
-    Returns:
-        安全化后的名称
-    """
-    if not name:
-        return "unnamed"
-    
-    # 移除非法字符，保留中英文、数字、下划线、短横线、空格
-    safe_chars = re.sub(r'[^\w\s\-\u4e00-\u9fff]', '', name)
-    
-    # 替换连续空白字符为单个下划线
-    safe_chars = re.sub(r'\s+', '_', safe_chars.strip())
-    
-    # 限制长度
-    if len(safe_chars) > max_len:
-        safe_chars = safe_chars[:max_len]
-    
-    return safe_chars if safe_chars else "unnamed"
-
-
 def parse_ds_dirname(dirname: str) -> Tuple[str, str, Optional[str], str]:
     """解析数据集目录名 - 支持v1命名协议
 
@@ -75,7 +49,8 @@ def parse_ds_dirname(dirname: str) -> Tuple[str, str, Optional[str], str]:
     import re
 
     # v1格式：{dataset_id}--{type_tag}--{safe_name}
-    v1_match = re.match(r'^([a-z0-9]{8,12})--([sm])--([A-Za-z0-9._-]+)$', dirname)
+    # safe_name 现在可以包含中文等 Unicode 字符
+    v1_match = re.match(r'^([a-z0-9]{8,12})--([sm])--(.+)$', dirname)
     if v1_match:
         ds_id, tag, safe_name = v1_match.groups()
         # 将下划线转回空格显示
@@ -94,17 +69,55 @@ def parse_ds_dirname(dirname: str) -> Tuple[str, str, Optional[str], str]:
 
 
 def safeify_name(name: str) -> str:
-    """将名称转换为安全的目录名
+    """将名称转换为安全的目录名（保留中文，移除非法字符）
 
     Args:
         name: 原始名称
 
     Returns:
-        安全的目录名，仅包含 [a-zA-Z0-9._-]
+        安全的目录名，移除Windows非法字符、控制字符，保留中文
     """
     import re
-    safe_name = re.sub(r'[^A-Za-z0-9._-]+', '_', name).strip('_')
-    return safe_name if safe_name else 'dataset'
+    import unicodedata
+    
+    if not name:
+        return 'dataset'
+    
+    # 1. Unicode 归一化（NFC）- 统一字符表示形式
+    normalized = unicodedata.normalize('NFC', name)
+    
+    # 2. 移除 Windows 非法字符: < > : " / \ | ? *
+    # 注意：路径分隔符已在这里移除
+    illegal_chars = r'[<>:"/\\|?*]'
+    safe = re.sub(illegal_chars, '_', normalized)
+    
+    # 3. 移除控制字符（\x00-\x1f, \x7f-\x9f）
+    safe = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', safe)
+    
+    # 4. 移除不可见空白字符（保留普通空格）
+    # \u200b 零宽空格, \u200c 零宽不连字, \u200d 零宽连字, \ufeff 字节顺序标记
+    safe = re.sub(r'[\u200b-\u200d\ufeff]', '', safe)
+    
+    # 5. 将连续空格替换为单个下划线，并去除首尾空格
+    safe = re.sub(r'\s+', '_', safe.strip())
+    
+    # 6. 去除首尾的点号和下划线（Windows 不允许）
+    safe = safe.strip('._')
+    
+    # 7. 限制长度（考虑中文占用更多字节）
+    # Windows 路径限制260字符，预留空间给目录前缀
+    max_bytes = 180  # 保守估计
+    if len(safe.encode('utf-8')) > max_bytes:
+        # 逐字符截断，确保不超过字节限制
+        result = ''
+        for char in safe:
+            test = result + char
+            if len(test.encode('utf-8')) > max_bytes:
+                break
+            result = test
+        safe = result.rstrip('._')
+    
+    return safe if safe else 'dataset'
 
 
 # ========== 统一命名管理 (混合式方案) ==========
@@ -147,11 +160,13 @@ def parse_unified_dataset_dirname(dirname: str) -> tuple[str, str | None, str, s
     import re
 
     # v1统一格式: {id}--{tag}--{safe_name}
-    v1_match = re.match(r'^([a-z0-9]{6,12})--([ivsm])--([A-Za-z0-9._-]+)$', dirname)
+    # safe_name 现在可以包含中文等 Unicode 字符
+    v1_match = re.match(r'^([a-z0-9]{6,12})--([ivsm])--(.+)$', dirname)
     if v1_match:
         ds_id, tag, safe_name = v1_match.groups()
         dataset_type_enum = DatasetType.from_tag(tag)
         if dataset_type_enum:
+            # 将下划线转回空格以恢复显示名称
             display_name = safe_name.replace('_', ' ')
             return ds_id, dataset_type_enum.value, display_name, "v1"
 

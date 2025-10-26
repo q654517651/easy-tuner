@@ -13,7 +13,7 @@ from datetime import datetime
 
 from .models import Dataset, DatasetType
 from .utils import (
-    gen_short_id, sanitize_name, parse_ds_dirname, next_control_index,
+    gen_short_id, safeify_name, parse_ds_dirname, next_control_index,
     atomic_write_text, generate_unique_name, find_paired_files,
     safe_filename, is_image_file, is_video_file, is_media_file,
     get_dataset_warehouse_path, get_dataset_subdirs
@@ -125,9 +125,8 @@ class DatasetManager:
                 # 验证名称
                 validate_dataset_name(name)
 
-                # 生成短ID和安全名称
+                # 生成短ID
                 dataset_id = gen_short_id()
-                safe_name = sanitize_name(name)
 
                 # 使用统一的目录创建方法 (混合式方案)
                 from .utils import create_unified_dataset_directory
@@ -135,7 +134,7 @@ class DatasetManager:
                     workspace_root=self.workspace_root,
                     dataset_id=dataset_id,
                     dataset_type=dataset_type,
-                    display_name=name
+                    display_name=name  # 传入原始名称，由 safeify_name 处理
                 )
 
                 # 创建数据集对象
@@ -185,13 +184,14 @@ class DatasetManager:
                 old_path = dataset_info['path']
                 warehouse_path = dataset_info['warehouse']
                 
-                # 生成新的目录名
-                safe_name = sanitize_name(new_name)
+                # 生成新的目录名（使用统一格式）
+                safe_name = safeify_name(new_name)
                 base_dirname = f"{dataset_id}__{safe_name}"
                 new_dirname = base_dirname
                 counter = 2
                 while (warehouse_path / new_dirname).exists() and new_dirname != old_path.name:
-                    new_dirname = f"{base_dirname} ({counter})"
+                    safe_name_with_counter = safeify_name(f"{new_name} {counter}")
+                    new_dirname = f"{dataset_id}__{safe_name_with_counter}"
                     counter += 1
                 
                 new_path = warehouse_path / new_dirname
