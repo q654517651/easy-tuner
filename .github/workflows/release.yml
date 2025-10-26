@@ -97,17 +97,35 @@ jobs:
           }
           
           Write-Host "[OK] Build completed"
-          Get-ChildItem dist\*.exe, dist\*.blockmap, dist\*.zip, dist\latest.yml | Format-Table Name, Length
+          Get-ChildItem dist\*.exe | Format-Table Name, Length
+        shell: powershell
+
+      - name: 创建便携版压缩包
+        working-directory: ./web
+        run: |
+          # 获取版本号
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          
+          # 检查 win-unpacked 目录
+          if (-not (Test-Path "dist\win-unpacked")) {
+            Write-Error "win-unpacked directory not found"
+            exit 1
+          }
+          
+          # 压缩 win-unpacked 为便携版
+          $portableName = "EasyTuner-Portable-$version.zip"
+          Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\$portableName" -Force
+          
+          Write-Host "[OK] Portable package created: $portableName"
+          Get-Item "dist\$portableName" | Format-Table Name, Length
         shell: powershell
 
       - name: 上传构建产物到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            web/dist/*.exe
-            web/dist/*.blockmap
-            web/dist/*.zip
-            web/dist/latest.yml
+            web/dist/*-Setup-*.exe
+            web/dist/*-Portable-*.zip
           draft: false
           prerelease: false
           generate_release_notes: true

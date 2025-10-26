@@ -2,6 +2,8 @@
   "name": "web",
   "private": true,
   "version": "0.0.1",
+  "description": "EasyTuner - AI模型训练数据集管理与标注工具",
+  "author": "EasyTuner Team",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -86,18 +88,9 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "src/assets/app_icon/AppIcon.png"
-    },
-    "zip": {
-      "artifactName": "${productName}-Portable-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -107,7 +100,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "EasyTuner",
-      "differentialPackage": true,
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
