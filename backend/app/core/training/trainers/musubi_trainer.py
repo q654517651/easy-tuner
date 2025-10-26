@@ -44,6 +44,7 @@ class MusubiTrainer:
         self._cancelled = False  # 取消标志
         self._id = uuid.uuid4().hex
         self._network_retry = NetworkRetryHelper(max_retries=2, retry_delay=3)
+        self._last_logged_line: Optional[str] = None  # 用于过滤重复日志行
 
         # ✨ 新架构：使用环境管理器统一提供的 Python 路径（避免重复逻辑）
         self._python_exe = self._paths.runtime_python
@@ -1200,6 +1201,12 @@ set "PYTHONIOENCODING=utf-8"
 
                 if output:
                     line = output.strip()
+
+                    # 过滤重复行：与上一行完全相同则跳过
+                    if line == self._last_logged_line:
+                        continue
+                    
+                    self._last_logged_line = line
 
                     # 统一写入与广播
                     if log_sink is not None:

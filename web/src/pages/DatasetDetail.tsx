@@ -613,46 +613,210 @@ export default function DatasetDetail() {
     if (fileList.length === 0 || !id) return;
 
     try {
-      // 上传文件到后端
-      const result = await datasetApi.uploadMediaFiles(id, fileList);
+      const isControlDataset = dataset?.type === 'single_control_image' || dataset?.type === 'multi_control_image';
 
-      // 静默：上传结果日志
+      if (isControlDataset) {
+        // 控制图数据集：智能分类文件
+        const normalFiles: File[] = [];
+        const controlFiles: { file: File; basename: string; index: number }[] = [];
 
-      // 上传成功后重新获取数据集详情
-      if (result.success_count > 0) {
+        for (const file of fileList) {
+          // 匹配控制图命名模式：basename_数字.扩展名
+          const match = file.name.match(/^(.+?)_(\d+)\.(jpg|jpeg|png|webp|bmp)$/i);
+
+          if (match) {
+            // 是控制图格式
+            const basename = match[1];
+            const index = parseInt(match[2]);
+            controlFiles.push({ file, basename, index });
+          } else {
+            // 普通图片
+            normalFiles.push(file);
+          }
+        }
+
+        let totalSuccess = 0;
+        let totalFailed = 0;
+        const errors: string[] = [];
+
+        // 1. 上传普通图片
+        if (normalFiles.length > 0) {
+          const result = await datasetApi.uploadMediaFiles(id, normalFiles);
+          totalSuccess += result.success_count;
+          totalFailed += result.failed_count;
+          errors.push(...result.errors);
+        }
+
+        // 2. 上传控制图
+        if (controlFiles.length > 0) {
+          // 需要先刷新数据集以获取最新的图片列表
+          const updatedDataset = await datasetApi.getDataset(id);
+          const currentItems = updatedDataset?.media_items || [];
+
+          for (const { file, basename, index } of controlFiles) {
+            try {
+              // 查找对应的原图（支持不同扩展名）
+              const originalItem = currentItems.find(item => {
+                const itemBasename = item.filename.replace(/\.(jpg|jpeg|png|webp|bmp)$/i, '');
+                return itemBasename === basename;
+              });
+
+              if (!originalItem) {
+                errors.push(`控制图 ${file.name} 没有找到对应的原图 ${basename}.*`);
+                totalFailed++;
+                continue;
+              }
+
+              // 构建FormData上传控制图
+              const formData = new FormData();
+              formData.append('original_filename', originalItem.filename);
+              formData.append('control_index', index.toString());
+              formData.append('control_file', file);
+
+              const response = await fetch(`${API_BASE_URL}/datasets/${id}/control-images`, {
+                method: 'POST',
+                body: formData
+              });
+
+              if (response.ok) {
+                totalSuccess++;
+              } else {
+                const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+                errors.push(`控制图 ${file.name} 上传失败: ${errorData.detail}`);
+                totalFailed++;
+              }
+
+            } catch (error: any) {
+              errors.push(`控制图 ${file.name} 上传失败: ${error.message}`);
+              totalFailed++;
+            }
+          }
+        }
+
+        // 刷新数据集
         const updatedDataset = await datasetApi.getDataset(id);
         if (updatedDataset) {
           setDataset(updatedDataset);
-          // 更新媒体文件列表
           const mediaItems = updatedDataset.media_items.map(item => ({
             id: item.id,
             filename: item.filename,
             url: joinApiUrl(item.url),
             caption: item.caption || "",
-            control_images: item.control_images
+            control_images: (item.control_images ?? []).map((ctrl: any) => ({
+              ...ctrl,
+              url: joinApiUrl(ctrl.url)
+            }))
           }));
           setItems(mediaItems);
         }
-      }
 
-      // 显示上传结果
-      if (result.success_count > 0) {
-        addToast({
-          title: "上传成功",
-          description: `成功上传 ${result.success_count} 个文件`,
-          color: "success",
-          timeout: 3000,
-        });
-      }
+        // 显示上传结果
+        if (totalSuccess > 0 && totalFailed === 0) {
+          // 全部成功
+          addToast({
+            title: "上传成功",
+            description: `成功上传 ${totalSuccess} 个文件${controlFiles.length > 0 ? '（含控制图）' : ''}`,
+            color: "success",
+            timeout: 3000,
+          });
+        } else if (totalSuccess > 0 && totalFailed > 0) {
+          // 部分成功
+          const missingOriginalCount = errors.filter(e => e.includes('没有找到对应的原图')).length;
+          const otherErrorCount = totalFailed - missingOriginalCount;
+          
+          let description = `成功 ${totalSuccess} 个，失败 ${totalFailed} 个`;
+          if (missingOriginalCount > 0) {
+            description += `\n其中 ${missingOriginalCount} 个控制图找不到对应的原图`;
+          }
+          if (otherErrorCount > 0) {
+            description += `\n其他错误 ${otherErrorCount} 个`;
+          }
+          
+          addToast({
+            title: "部分文件上传失败",
+            description: description,
+            color: "warning",
+            timeout: 6000,
+          });
+        } else if (totalFailed > 0) {
+          // 全部失败
+          const missingOriginalCount = errors.filter(e => e.includes('没有找到对应的原图')).length;
+          
+          if (missingOriginalCount === totalFailed) {
+            // 全部是因为找不到原图
+            addToast({
+              title: "上传失败",
+              description: `${totalFailed} 个控制图找不到对应的原图\n请先上传原图，或将原图与控制图一起拖入`,
+              color: "danger",
+              timeout: 6000,
+            });
+          } else if (missingOriginalCount > 0) {
+            // 部分是找不到原图
+            addToast({
+              title: "上传失败",
+              description: `${totalFailed} 个文件上传失败\n其中 ${missingOriginalCount} 个控制图找不到对应的原图`,
+              color: "danger",
+              timeout: 6000,
+            });
+          } else {
+            // 其他原因
+            addToast({
+              title: "上传失败",
+              description: `${totalFailed} 个文件上传失败\n${errors[0] || '请查看控制台了解详情'}`,
+              color: "danger",
+              timeout: 6000,
+            });
+          }
+        }
 
-      if (result.errors.length > 0) {
-        console.warn('部分文件上传失败:', result.errors);
-        addToast({
-          title: "部分上传失败",
-          description: `${result.errors.length} 个文件上传失败`,
-          color: "warning",
-          timeout: 5000,
-        });
+      } else {
+        // 非控制图数据集：所有文件都作为普通图片上传
+        const result = await datasetApi.uploadMediaFiles(id, fileList);
+
+        // 上传成功后重新获取数据集详情
+        if (result.success_count > 0) {
+          const updatedDataset = await datasetApi.getDataset(id);
+          if (updatedDataset) {
+            setDataset(updatedDataset);
+            const mediaItems = updatedDataset.media_items.map(item => ({
+              id: item.id,
+              filename: item.filename,
+              url: joinApiUrl(item.url),
+              caption: item.caption || "",
+              control_images: item.control_images
+            }));
+            setItems(mediaItems);
+          }
+        }
+
+        // 显示上传结果
+        if (result.success_count > 0 && result.failed_count === 0) {
+          // 全部成功
+          addToast({
+            title: "上传成功",
+            description: `成功上传 ${result.success_count} 个文件`,
+            color: "success",
+            timeout: 3000,
+          });
+        } else if (result.success_count > 0 && result.failed_count > 0) {
+          // 部分成功
+          console.warn('部分文件上传失败:', result.errors);
+          addToast({
+            title: "部分文件上传成功",
+            description: `成功 ${result.success_count} 个，失败 ${result.failed_count} 个\n${result.errors[0] || '查看控制台了解详情'}`,
+            color: "warning",
+            timeout: 5000,
+          });
+        } else if (result.failed_count > 0) {
+          // 全部失败
+          console.error('所有文件上传失败:', result.errors);
+          addToast({
+            title: "上传失败",
+            description: `${result.failed_count} 个文件全部上传失败\n${result.errors[0] || '请查看控制台了解详情'}`,
+            color: "danger",
+            timeout: 5000,
+          });
+        }
       }
 
     } catch (error) {
