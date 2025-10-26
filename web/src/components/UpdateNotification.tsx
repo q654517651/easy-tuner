@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button, Progress } from '@heroui/react';
+import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button } from '@heroui/react';
 
 interface UpdateInfo {
   version: string;
@@ -7,20 +7,11 @@ interface UpdateInfo {
   releaseDate?: string;
 }
 
-interface DownloadProgress {
-  percent: number;
-  bytesPerSecond: number;
-  transferred: number;
-  total: number;
-}
+const GITHUB_RELEASES_URL = 'https://github.com/q654517651/easy-tuner/releases';
 
 export function UpdateNotification() {
   const [isUpdateAvailable, setIsUpdateAvailable] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
-  const [isReadyToInstall, setIsReadyToInstall] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // 监听更新事件
@@ -29,69 +20,42 @@ export function UpdateNotification() {
       setIsUpdateAvailable(true);
     };
 
-    const handleDownloadProgress = (progress: DownloadProgress) => {
-      setDownloadProgress(progress);
-    };
-
-    const handleUpdateDownloaded = () => {
-      setIsDownloading(false);
-      setIsReadyToInstall(true);
-    };
-
-    const handleError = (err: { message: string }) => {
-      setError(err.message);
-      setIsDownloading(false);
-    };
-
     // 注册监听器
     if (window.electron?.on) {
       window.electron.on('updater:update-available', handleUpdateAvailable);
-      window.electron.on('updater:download-progress', handleDownloadProgress);
-      window.electron.on('updater:update-downloaded', handleUpdateDownloaded);
-      window.electron.on('updater:error', handleError);
     }
 
     return () => {
       // 清理监听器
       if (window.electron?.removeAllListeners) {
         window.electron.removeAllListeners('updater:update-available');
-        window.electron.removeAllListeners('updater:download-progress');
-        window.electron.removeAllListeners('updater:update-downloaded');
-        window.electron.removeAllListeners('updater:error');
       }
     };
   }, []);
 
-  const handleDownload = async () => {
-    setIsDownloading(true);
-    setError(null);
-    await window.electron?.updater?.downloadUpdate();
+  const handleOpenReleases = () => {
+    // 打开浏览器到 GitHub releases 页面
+    if (window.electron?.openExternal) {
+      // 桌面版：使用系统默认浏览器
+      window.electron.openExternal(GITHUB_RELEASES_URL);
+    } else {
+      // Web 版本：使用普通打开方式
+      window.open(GITHUB_RELEASES_URL, '_blank');
+    }
+    setIsUpdateAvailable(false);
   };
 
-  const handleInstall = () => {
-    window.electron?.updater?.quitAndInstall();
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const formatSpeed = (bytesPerSecond: number) => {
-    return formatBytes(bytesPerSecond) + '/s';
+  const handleClose = () => {
+    setIsUpdateAvailable(false);
   };
 
   // 发现新版本弹窗
-  if (isUpdateAvailable && !isReadyToInstall) {
+  if (isUpdateAvailable) {
     return (
       <Modal 
         isOpen={true} 
-        onClose={() => setIsUpdateAvailable(false)}
-        isDismissable={!isDownloading}
-        hideCloseButton={isDownloading}
+        onClose={handleClose}
+        isDismissable={true}
       >
         <ModalContent>
           <ModalHeader className="flex flex-col gap-1">
@@ -107,67 +71,16 @@ export function UpdateNotification() {
               </div>
             )}
             
-            {isDownloading && downloadProgress && (
-              <div className="space-y-2">
-                <Progress 
-                  value={downloadProgress.percent} 
-                  className="max-w-full"
-                  color="primary"
-                  showValueLabel={true}
-                />
-                <div className="flex justify-between text-xs text-default-500">
-                  <span>{formatBytes(downloadProgress.transferred)} / {formatBytes(downloadProgress.total)}</span>
-                  <span>{formatSpeed(downloadProgress.bytesPerSecond)}</span>
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="text-sm text-danger">
-                下载失败：{error}
-              </div>
-            )}
-          </ModalBody>
-          <ModalFooter>
-            {!isDownloading && (
-              <>
-                <Button variant="light" onPress={() => setIsUpdateAvailable(false)}>
-                  稍后提醒
-                </Button>
-                <Button color="primary" onPress={handleDownload}>
-                  立即下载
-                </Button>
-              </>
-            )}
-            {isDownloading && (
-              <Button isDisabled color="primary">
-                下载中...
-              </Button>
-            )}
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-    );
-  }
-
-  // 准备安装弹窗
-  if (isReadyToInstall) {
-    return (
-      <Modal isOpen={true} isDismissable={false} hideCloseButton>
-        <ModalContent>
-          <ModalHeader>✅ 更新已就绪</ModalHeader>
-          <ModalBody>
-            <p>新版本 v{updateInfo?.version} 已下载完成。</p>
-            <p className="text-sm text-default-600 mt-2">
-              点击"立即安装"将退出应用并安装更新。
+            <p className="text-sm text-default-600">
+              点击"前往下载"将在浏览器中打开 GitHub Releases 页面，您可以手动下载最新版本。
             </p>
           </ModalBody>
           <ModalFooter>
-            <Button variant="light" onPress={() => setIsReadyToInstall(false)}>
-              稍后安装
+            <Button variant="light" onPress={handleClose}>
+              稍后提醒
             </Button>
-            <Button color="primary" onPress={handleInstall}>
-              立即安装
+            <Button color="primary" onPress={handleOpenReleases}>
+              前往下载
             </Button>
           </ModalFooter>
         </ModalContent>

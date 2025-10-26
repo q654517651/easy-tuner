@@ -56,6 +56,7 @@ export default function DatasetDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [dragDepth, setDragDepth] = useState(0);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [batchLabeling, setBatchLabeling] = useState(false);
   const [labelingItems, setLabelingItems] = useState<Set<string>>(new Set());
@@ -584,6 +585,7 @@ export default function DatasetDetail() {
     if (!isFileDrag(e)) return;
 
     e.preventDefault();
+    setDragDepth(0);
     setDragging(false);
 
     const fileList = Array.from(e.dataTransfer.files);
@@ -798,7 +800,11 @@ export default function DatasetDetail() {
         if (!isFileDrag(e)) return;
 
         e.preventDefault();
-        setDragging(true);
+        setDragDepth((d) => {
+          const nd = d + 1;
+          if (nd === 1) setDragging(true);
+          return nd;
+        });
       }}
       onDragOver={(e) => {
         // 只处理文件拖拽，忽略内部标签拖拽
@@ -811,7 +817,11 @@ export default function DatasetDetail() {
         if (!isFileDrag(e)) return;
 
         e.preventDefault();
-        setDragging(false);
+        setDragDepth((d) => {
+          const nd = Math.max(0, d - 1);
+          if (nd === 0) setDragging(false);
+          return nd;
+        });
       }}
       onDrop={handleDrop}
     >

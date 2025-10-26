@@ -33,14 +33,14 @@ process.on('unhandledRejection', async (reason) => {
   app.exit(1);
 });
 
-// ---- 配置 autoUpdater ----
+// ---- 配置 autoUpdater（仅用于检查更新，手动下载）----
 if (isProd) {
   // 设置日志级别
   autoUpdater.logger = console;
   
   // 配置更新选项
-  autoUpdater.autoDownload = false; // 不自动下载，让用户确认
-  autoUpdater.autoInstallOnAppQuit = true; // 退出时自动安装
+  autoUpdater.autoDownload = false; // 不自动下载
+  autoUpdater.autoInstallOnAppQuit = false; // 不自动安装
   
   // 更新事件监听
   autoUpdater.on('checking-for-update', () => {
@@ -65,27 +65,9 @@ if (isProd) {
   });
 
   autoUpdater.on('error', (err) => {
-    console.error('[updater] 更新错误:', err);
-    win?.webContents.send('updater:error', {
-      message: err.message
-    });
-  });
-
-  autoUpdater.on('download-progress', (progressObj) => {
-    console.log(`[updater] 下载进度: ${progressObj.percent.toFixed(2)}%`);
-    win?.webContents.send('updater:download-progress', {
-      percent: progressObj.percent,
-      bytesPerSecond: progressObj.bytesPerSecond,
-      transferred: progressObj.transferred,
-      total: progressObj.total,
-    });
-  });
-
-  autoUpdater.on('update-downloaded', (info) => {
-    console.log('[updater] 更新已下载，准备安装');
-    win?.webContents.send('updater:update-downloaded', {
-      version: info.version
-    });
+    console.error('[updater] 更新检查错误:', err);
+    // 静默处理错误，不打扰用户
+    console.log('[updater] 将使用手动更新方式');
   });
 }
 
@@ -293,7 +275,7 @@ ipcMain.on("win:maxToggle", () => {
 ipcMain.handle("win:isMaximized", () => win?.isMaximized() ?? false);
 ipcMain.handle("win:isFocused", () => win?.isFocused() ?? false);
 
-// ---- IPC：更新相关 ----
+// ---- IPC：更新相关（仅检查，不下载安装）----
 // 检查更新
 ipcMain.handle('updater:check-for-updates', async () => {
   if (!isProd) {
@@ -310,30 +292,6 @@ ipcMain.handle('updater:check-for-updates', async () => {
     console.error('[updater] 检查更新失败:', error);
     return { error: error.message };
   }
-});
-
-// 开始下载更新
-ipcMain.handle('updater:download-update', async () => {
-  if (!isProd) {
-    return { error: '开发模式下不支持自动更新' };
-  }
-  
-  try {
-    await autoUpdater.downloadUpdate();
-    return { success: true };
-  } catch (error: any) {
-    console.error('[updater] 下载更新失败:', error);
-    return { error: error.message };
-  }
-});
-
-// 退出并安装更新
-ipcMain.handle('updater:quit-and-install', () => {
-  if (!isProd) {
-    return { error: '开发模式下不支持自动更新' };
-  }
-  
-  autoUpdater.quitAndInstall(false, true);
 });
 
 // ---- IPC：后端健康检查 ----
@@ -392,6 +350,16 @@ ipcMain.handle("open-folder", async (_evt, { folderPath }: { folderPath: string 
     }
   } catch (error) {
     return { ok: false, error: `打开目录失败: ${error}` };
+  }
+});
+
+// ---- IPC：打开外部链接 ----
+ipcMain.handle("shell:openExternal", async (_evt, url: string) => {
+  try {
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: `打开链接失败: ${error}` };
   }
 });
 

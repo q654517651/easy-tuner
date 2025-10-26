@@ -144,7 +144,7 @@ export default function Sidebar() {
 
           {/* GitHub */}
           <button
-            onClick={() => window.open('https://github.com/your-repo-url', '_blank')}
+            onClick={() => window.electron?.openExternal('https://github.com/q654517651/easy-tuner')}
             className="flex items-center gap-2 p-3 rounded-[16px] mx-3 my-1 text-sm transition-colors hover:bg-black/5 dark:hover:bg-white/5 w-[calc(100%-24px)] text-gray-900 dark:text-gray-100"
           >
             <span className="flex items-center justify-center w-6 h-6 [&>svg]:w-5 [&>svg]:h-5 [&_svg]:fill-current [&_path]:fill-current">

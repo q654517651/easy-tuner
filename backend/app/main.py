@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="EasyTuner API",
     description="EasyTuner 数据集管理和AI训练平台 API",
-    version="0.0.2",
+    version="0.0.1",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan

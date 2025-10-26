@@ -6,22 +6,14 @@ interface UpdateInfo {
   releaseDate?: string;
 }
 
-interface DownloadProgress {
-  percent: number;
-  bytesPerSecond: number;
-  transferred: number;
-  total: number;
-}
-
 interface ElectronUpdater {
   checkForUpdates: () => Promise<any>;
-  downloadUpdate: () => Promise<any>;
-  quitAndInstall: () => void;
 }
 
 interface ElectronAPI {
   // 文件夹操作
   openFolder: (folderPath: string) => Promise<{ ok: boolean; error?: string }>;
+  openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
   selectWorkspace: () => Promise<{ canceled: boolean; path: string }>;
   
   // 更新相关

@@ -34,14 +34,15 @@ contextBridge.exposeInMainWorld("electron", {
   // 打开文件夹（接收绝对路径）
   openFolder: (folderPath: string) =>
     ipcRenderer.invoke("open-folder", { folderPath }) as Promise<{ ok: boolean; error?: string }>,
+  // 打开外部链接（系统默认浏览器）
+  openExternal: (url: string) =>
+    ipcRenderer.invoke("shell:openExternal", url) as Promise<{ ok: boolean; error?: string }>,
   // 选择工作区目录
   selectWorkspace: () => ipcRenderer.invoke('system:selectWorkspaceDialog') as Promise<{ canceled: boolean; path: string }>,
   
-  // 更新相关 API
+  // 更新相关 API（仅检查更新）
   updater: {
     checkForUpdates: () => ipcRenderer.invoke('updater:check-for-updates'),
-    downloadUpdate: () => ipcRenderer.invoke('updater:download-update'),
-    quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
   },
   
   // 更新事件监听
@@ -50,9 +51,6 @@ contextBridge.exposeInMainWorld("electron", {
       'updater:checking-for-update',
       'updater:update-available',
       'updater:update-not-available',
-      'updater:download-progress',
-      'updater:update-downloaded',
-      'updater:error',
       'backend:ready',
       'win:maximize-changed'
     ];
