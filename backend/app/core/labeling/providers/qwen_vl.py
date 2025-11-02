@@ -19,7 +19,8 @@ class QwenVLProvider(LabelingProvider):
     capabilities: Sequence[str] = ("label_image",)  # 暂不支持翻译
 
     def __init__(self):
-        self.config = get_config()
+        # 不再缓存配置，每次使用时动态获取最新配置
+        pass
 
     @classmethod
     def get_metadata(cls) -> ProviderMetadata:
@@ -28,11 +29,25 @@ class QwenVLProvider(LabelingProvider):
         return PROVIDER_METADATA["local_qwen_vl"]
 
     def _get_config(self) -> dict:
-        """获取 Qwen-VL 配置"""
-        qwen_config = self.config.labeling.models.get('local_qwen_vl', {})
-        if not qwen_config:
-            raise ValueError("Qwen-VL 模型未配置，请在设置页配置权重文件路径")
-
+        """获取 Qwen-VL 配置（自动填充默认值）"""
+        config = get_config()
+        user_config = config.labeling.models.get('local_qwen_vl', {})
+        
+        # 从 registry 获取默认值
+        from .registry import PROVIDER_METADATA
+        metadata = PROVIDER_METADATA.get('local_qwen_vl')
+        
+        # 先用默认值初始化
+        qwen_config = {}
+        if metadata:
+            for field in metadata.config_fields:
+                if field.default is not None:
+                    qwen_config[field.key] = field.default
+        
+        # 用户配置覆盖默认值
+        qwen_config.update(user_config)
+        
+        # 验证必填字段
         weights_path = qwen_config.get('weights_path', '')
         if not weights_path:
             raise ValueError(
@@ -145,7 +160,7 @@ class QwenVLProvider(LabelingProvider):
                 image_paths.append(str(img))
 
         # 获取 prompt
-        use_prompt = prompt if prompt is not None else (self.config.labeling.default_prompt or "")
+        use_prompt = prompt if prompt is not None else (get_config().labeling.default_prompt or "")
 
         # 获取权重路径
         weights_path = config.get('weights_path', '')
@@ -222,17 +237,20 @@ class QwenVLProvider(LabelingProvider):
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
 
-        # 添加 musubi-tuner 源码路径到 PYTHONPATH（解决 ModuleNotFoundError）
+        # 传递 workspace 路径给子进程脚本
         try:
             from ....core.environment import get_paths
             paths = get_paths()
-            musubi_src = paths.musubi_src  # resources/runtime/engines/musubi-tuner/src
-
-            log_info(f"[QwenVL] musubi_src path: {musubi_src}")
-            log_info(f"[QwenVL] musubi_src exists: {musubi_src.exists()}")
+            
+            # 设置环境变量，脚本会使用此路径构建 musubi_src
+            env["EASYTUNER_WORKSPACE"] = str(paths.workspace_root)
+            log_info(f"[QwenVL] Set EASYTUNER_WORKSPACE: {paths.workspace_root}")
+            
+            musubi_src = paths.musubi_src  # workspace/runtime/engines/musubi-tuner/src
+            log_info(f"[QwenVL] musubi_src: {musubi_src}, exists: {musubi_src.exists()}")
 
             if musubi_src.exists():
-                # 将 musubi_tuner 的父目录添加到 PYTHONPATH
+                # 同时添加到 PYTHONPATH 作为备用
                 pythonpath = str(musubi_src)
                 if "PYTHONPATH" in env:
                     env["PYTHONPATH"] = f"{pythonpath}{os.pathsep}{env['PYTHONPATH']}"
@@ -240,10 +258,10 @@ class QwenVLProvider(LabelingProvider):
                     env["PYTHONPATH"] = pythonpath
                 log_info(f"[QwenVL] Added PYTHONPATH: {pythonpath}")
             else:
-                log_warning(f"[QwenVL] musubi-tuner src path does not exist: {musubi_src}")
+                log_warning(f"[QwenVL] musubi-tuner src not found: {musubi_src}")
         except Exception as e:
             import traceback
-            log_error(f"[QwenVL] Failed to set PYTHONPATH: {str(e)}\n{traceback.format_exc()}")
+            log_error(f"[QwenVL] Failed to set environment: {str(e)}\n{traceback.format_exc()}")
 
         log_info(f"[QwenVL] 启动子进程: {' '.join(cmd[:3])} ...")
 

@@ -53,9 +53,20 @@ export const TaskSamplesView: React.FC<TaskSamplesViewProps> = ({ taskId, refres
 
       ]);
 
-      setSamples(samplesData);
+      // 将相对路径转换为完整 URL（Electron 环境需要）
+      const { joinApiUrl } = await import("../services/api");
+      const normalizedSamples = samplesData.map(item => ({
+        ...item,
+        url: joinApiUrl(item.url)
+      }));
+      const normalizedArtifacts = artifactsData.map(item => ({
+        ...item,
+        url: joinApiUrl(item.url)
+      }));
 
-      setArtifacts(artifactsData);
+      setSamples(normalizedSamples);
+
+      setArtifacts(normalizedArtifacts);
 
     } catch (error) {
 

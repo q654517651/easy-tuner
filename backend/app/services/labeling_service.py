@@ -28,7 +28,7 @@ class LabelingServiceAPI:
     """打标服务API层 - 直接使用 Provider 架构"""
 
     def __init__(self):
-        self._config = get_config()
+        # 不再缓存配置对象，每次使用时动态获取最新配置
         self._dataset_service = get_dataset_service()
         self.tasks: Dict[str, LabelingProgress] = {}
         self.results: Dict[str, LabelingResult] = {}
@@ -192,7 +192,7 @@ class LabelingServiceAPI:
             
             # 准备打标参数
             core_model_type = self._convert_model_type(request.model_type)
-            prompt = request.prompt or self._config.labeling.default_prompt
+            prompt = request.prompt or get_config().labeling.default_prompt
             
             # 批量处理图片
             image_paths = []
@@ -393,7 +393,7 @@ class LabelingServiceAPI:
             raise ValidationError(f"文件未找到: {filename}")
 
         # 使用核心打标服务（按当前选中模型 & 默认 prompt）
-        selected_model = self._config.labeling.selected_model
+        selected_model = get_config().labeling.selected_model
         log_info(f"[LabelingService] 使用模型 '{selected_model}' 对 {filename} 进行打标")
 
         try:

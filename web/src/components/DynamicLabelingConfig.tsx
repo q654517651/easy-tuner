@@ -50,7 +50,7 @@ export default function DynamicLabelingConfig({ settings, onUpdate }: DynamicLab
           models: {
             ...settings.labeling.models,
             [selectedProviderId]: {
-              ...settings.labeling.models[selectedProviderId],
+              ...(settings.labeling.models[selectedProviderId] || {}),
               [field.key]: newValue
             }
           }

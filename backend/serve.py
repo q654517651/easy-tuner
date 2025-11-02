@@ -45,9 +45,16 @@ from pathlib import Path
 
 # 兼容 PyInstaller 单文件
 if getattr(sys, "frozen", False):  # running from EXE
-    # 打包环境：EXE 在根目录，资源在 resources/backend
-    project_root = Path(sys.executable).parent
-    base_dir = project_root / "resources" / "backend"
+    # 打包环境（Electron）：EXE 在 resources/backend/EasyTunerBackend.exe
+    # 项目根应该是 resources/ 目录
+    exe_dir = Path(sys.executable).parent  # resources/backend
+    if exe_dir.name.lower() == "backend":
+        project_root = exe_dir.parent  # resources
+        base_dir = exe_dir  # resources/backend
+    else:
+        # 兜底：如果不在预期的 backend 目录中
+        project_root = exe_dir
+        base_dir = exe_dir
 else:
     # 开发环境：serve.py 在 backend/ 目录下
     base_dir = Path(__file__).parent  # backend/

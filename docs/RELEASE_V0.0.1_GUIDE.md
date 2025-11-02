@@ -323,3 +323,37 @@ https://github.com/q654517651/easy-tuner/releases/download/v0.0.1/EasyTuner.Setu
 
 祝你发布顺利！🚀
 
+Git 常用命令大全（实战版）
+一、版本标签（tag）管理
+📌 添加版本号
+# 创建轻量标签（仅记录当前提交）
+git tag v0.0.3
+
+# 或带注释（推荐）
+git tag -a v0.0.3 -m "Release v0.0.3: 初始稳定版本"
+
+🚀 推送标签到远端
+# 推送单个版本
+git push origin v0.0.3
+
+# 推送所有未同步的标签
+git push origin --tags
+
+🗑 删除本地标签
+git tag -d v0.0.1
+git tag -d v0.0.2
+
+🌐 删除远端标签
+# 两种等价写法
+git push origin --delete tag v0.0.1
+git push origin :refs/tags/v0.0.2
+
+🧾 查看标签
+git tag
+git show v0.0.3
+
+git add .
+
+git commit -m "修复日志重复"
+
+git push origin master

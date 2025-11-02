@@ -120,12 +120,25 @@ jobs:
           Get-Item "dist\$portableName" | Format-Table Name, Length
         shell: powershell
 
+      - name: 清理不需要的文件
+        working-directory: ./web/dist
+        run: |
+          # 删除不需要的 blockmap 和其他自动更新文件
+          Remove-Item -Path "*.blockmap" -ErrorAction SilentlyContinue
+          Remove-Item -Path "*.yml" -ErrorAction SilentlyContinue
+          Remove-Item -Path "*-Setup-*.zip" -ErrorAction SilentlyContinue
+          
+          Write-Host "[OK] Cleaned up unnecessary files"
+          Write-Host "Remaining files:"
+          Get-ChildItem | Format-Table Name, Length
+        shell: powershell
+
       - name: 上传构建产物到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            web/dist/*-Setup-*.exe
-            web/dist/*-Portable-*.zip
+            web/dist/EasyTuner-Setup-*.exe
+            web/dist/EasyTuner-Portable-*.zip
           draft: false
           prerelease: false
           generate_release_notes: true

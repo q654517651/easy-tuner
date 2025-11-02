@@ -43,6 +43,24 @@ def serialize_config() -> Dict[str, Any]:
                 value = getattr(getattr(cfg.model_paths, model_key, object()), field_key, "")
                 model_paths[model_key][field_key] = value
 
+    # 获取所有已知的 provider，并填充默认值
+    from ...core.labeling.providers.registry import PROVIDER_METADATA
+    labeling_models = {}
+    for provider_id, metadata in PROVIDER_METADATA.items():
+        # 获取用户配置（如果有）
+        user_config = cfg.labeling.models.get(provider_id, {})
+        
+        # 初始化该 provider 的配置，先填充所有字段的默认值
+        provider_config = {}
+        for field in metadata.config_fields:
+            # 优先使用用户配置的值，如果没有则使用默认值
+            if field.key in user_config:
+                provider_config[field.key] = user_config[field.key]
+            elif field.default is not None:
+                provider_config[field.key] = field.default
+        
+        labeling_models[provider_id] = provider_config
+
     return {
         "musubi": asdict(cfg.musubi),
         "model_paths": model_paths,
@@ -51,7 +69,7 @@ def serialize_config() -> Dict[str, Any]:
             "translation_prompt": cfg.labeling.translation_prompt,
             "selected_model": cfg.labeling.selected_model,
             "delay_between_calls": cfg.labeling.delay_between_calls,
-            "models": cfg.labeling.models  # 直接使用字典，无需转换
+            "models": labeling_models  # 确保所有 provider 都有默认空配置
         }
     }
 
@@ -239,11 +257,35 @@ async def update_all_settings(request: Dict[str, Any]):
             except Exception:
                 pass
 
-        # 更新 models 配置（现在是字典）
+        # 更新 models 配置（合并而不是替换，兼容旧版配置）
         models = lb.get("models", {})
         if models and isinstance(models, dict):
-            # 直接更新字典
-            cfg.labeling.models = models
+            # 确保 cfg.labeling.models 是字典类型
+            if not isinstance(cfg.labeling.models, dict):
+                cfg.labeling.models = {}
+            
+            # 获取 provider 的元数据，用于填充默认值
+            from ...core.labeling.providers.registry import PROVIDER_METADATA
+            
+            # 合并配置：只更新传入的 provider，保留未传入的
+            for provider_id, provider_config in models.items():
+                if provider_config is not None:  # 允许空字典，但跳过 None
+                    # 如果 provider_config 为空或缺少字段，自动填充默认值
+                    metadata = PROVIDER_METADATA.get(provider_id)
+                    if metadata and isinstance(provider_config, dict):
+                        # 先用默认值初始化，然后只保留 metadata 中定义的字段
+                        merged_config = {}
+                        for field in metadata.config_fields:
+                            # 优先使用用户配置的值，否则使用默认值
+                            if field.key in provider_config:
+                                merged_config[field.key] = provider_config[field.key]
+                            elif field.default is not None:
+                                merged_config[field.key] = field.default
+                        
+                        cfg.labeling.models[provider_id] = merged_config
+                    else:
+                        # 没有元数据或配置不是字典，直接保存
+                        cfg.labeling.models[provider_id] = provider_config
 
         save_config(cfg)
 

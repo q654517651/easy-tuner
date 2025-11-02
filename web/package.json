@@ -64,14 +64,9 @@
     "appId": "com.easytuner.app",
     "productName": "EasyTuner",
     "artifactName": "${productName}-Setup-${version}.${ext}",
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "q654517651",
-        "repo": "easy-tuner",
-        "releaseType": "release"
-      }
-    ],
+    "electronUpdaterCompatibility": ">= 2.16",
+    "generateUpdatesFilesForAllChannels": false,
+    "publish": null,
     "files": [
       "dist/**",
       "dist-electron/**"
@@ -100,7 +95,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "EasyTuner",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "differentialPackage": false
     },
     "mac": {
       "target": [

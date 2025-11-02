@@ -15,7 +15,8 @@ class GPTProvider(LabelingProvider):
     capabilities: Sequence[str] = ("label_image", "translate_text")
 
     def __init__(self):
-        self.config = get_config()
+        # 不再缓存配置，每次使用时动态获取最新配置
+        pass
 
     def _ensure_sdk(self):
         """确保 OpenAI SDK 可用"""
@@ -25,11 +26,25 @@ class GPTProvider(LabelingProvider):
             raise RuntimeError(f"OpenAI SDK 不可用，请安装: pip install openai\n详细错误: {e}")
 
     def _get_config(self) -> dict:
-        """获取 GPT 配置"""
-        gpt_config = self.config.labeling.models.get('gpt', {})
-        if not gpt_config:
-            raise ValueError("GPT 模型未配置，请在设置页配置 API Key 和 Base URL")
-
+        """获取 GPT 配置（自动填充默认值）"""
+        config = get_config()
+        user_config = config.labeling.models.get('gpt', {})
+        
+        # 从 registry 获取默认值
+        from .registry import PROVIDER_METADATA
+        metadata = PROVIDER_METADATA.get('gpt')
+        
+        # 先用默认值初始化
+        gpt_config = {}
+        if metadata:
+            for field in metadata.config_fields:
+                if field.default is not None:
+                    gpt_config[field.key] = field.default
+        
+        # 用户配置覆盖默认值
+        gpt_config.update(user_config)
+        
+        # 验证必填字段
         api_key = gpt_config.get('api_key', '')
         base_url = gpt_config.get('base_url', '')
 
@@ -89,7 +104,7 @@ class GPTProvider(LabelingProvider):
                     continue
 
                 # 构建消息
-                use_prompt = prompt if prompt is not None else (self.config.labeling.default_prompt or "描述这张图片")
+                use_prompt = prompt if prompt is not None else (get_config().labeling.default_prompt or "描述这张图片")
                 messages = build_messages_for_image(use_prompt, img_path)
 
                 # 同步调用包装为异步
@@ -138,7 +153,7 @@ class GPTProvider(LabelingProvider):
 
         try:
             content = text or ""
-            prompt = self.config.labeling.translation_prompt or "请翻译以下内容"
+            prompt = get_config().labeling.translation_prompt or "请翻译以下内容"
             messages = build_messages_for_text(prompt, content)
 
             def _call_openai():

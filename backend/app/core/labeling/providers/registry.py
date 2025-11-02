@@ -91,14 +91,6 @@ PROVIDER_METADATA: Dict[str, ProviderMetadata] = {
                 description="LM Studio 本地服务地址"
             ),
             ConfigField(
-                key="model_name",
-                label="模型名称",
-                type=ConfigFieldType.TEXT,
-                default="local-model",
-                placeholder="local-model",
-                description="LM Studio 中加载的模型名称"
-            ),
-            ConfigField(
                 key="max_tokens",
                 label="最大 Token 数",
                 type=ConfigFieldType.NUMBER,
