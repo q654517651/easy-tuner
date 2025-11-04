@@ -133,6 +133,37 @@ jobs:
           Get-ChildItem | Format-Table Name, Length
         shell: powershell
 
+      - name: 清理旧 Release 中的无用文件
+        continue-on-error: true
+        run: |
+          # 删除 Release 中的旧文件（blockmap、yml、多余的 zip）
+          # 注意：如果文件不存在会报错，但 continue-on-error 会忽略
+          $tag = "${{ github.ref_name }}"
+          
+          Write-Host "尝试清理 Release $tag 中的旧文件..."
+          
+          # 列出可能需要删除的文件（旧的 blockmap、yml、多余的 Setup zip）
+          $version = $tag.TrimStart('v')
+          $filesToDelete = @(
+            "EasyTuner-Setup-$version.exe.blockmap",
+            "EasyTuner-Setup-$version.zip",
+            "latest.yml",
+            "builder-debug.yml",
+            "builder-effective-config.yaml"
+          )
+          
+          foreach ($file in $filesToDelete) {
+            try {
+              gh release delete-asset $tag $file --yes 2>$null
+              Write-Host "  ✓ 删除: $file"
+            } catch {
+              Write-Host "  - 跳过: $file (不存在或已删除)"
+            }
+          }
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 上传构建产物到 Release
         uses: softprops/action-gh-release@v2
         with:

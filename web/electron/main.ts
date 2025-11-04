@@ -131,6 +131,14 @@ async function createWindow() {
     },
   });
 
+  // 🔧 立即注入初始端口（默认 8000），避免前端在后端启动前获取到空值
+  // 后端启动完成后会更新为实际端口
+  win.webContents.on('did-finish-load', () => {
+    win?.webContents.executeJavaScript(`window.__BACKEND_PORT__ = ${BACKEND_PORT};`).catch(err => {
+      console.error('[electron] Failed to inject initial BACKEND_PORT:', err);
+    });
+  });
+
   if (isProd) {
     // 生产模式：加载构建后的前端文件
     const indexHtml = path.join(__dirname, "../dist/index.html");

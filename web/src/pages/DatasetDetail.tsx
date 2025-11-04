@@ -8,7 +8,7 @@ import { AppButton } from "../ui/primitives/Button";
 import { AppModal } from "../ui/primitives/Modal";
 import { convertToDatasetCardProps } from "../utils/dataset-card-adapter";
 import TagManager from "../components/TagManager";
-import { datasetApi, labelingApi, imagesApi, joinApiUrl, API_BASE_URL } from "../services/api";
+import { datasetApi, labelingApi, imagesApi, joinApiUrl, getApiBaseUrl } from "../services/api";
 import EmptyState from "../ui/EmptyState";
 import EmptyImg from "../assets/img/EmptyDataset.png?inline";
 
@@ -383,7 +383,7 @@ export default function DatasetDetail() {
         formData.append('control_file', file);
 
         // 调用上传API
-        const response = await fetch(`${API_BASE_URL}/datasets/${id}/control-images`, {
+        const response = await fetch(`${getApiBaseUrl()}/datasets/${id}/control-images`, {
           method: 'POST',
           body: formData
         });
@@ -652,7 +652,7 @@ export default function DatasetDetail() {
               formData.append('control_index', index.toString());
               formData.append('control_file', file);
 
-              const response = await fetch(`${API_BASE_URL}/datasets/${id}/control-images`, {
+              const response = await fetch(`${getApiBaseUrl()}/datasets/${id}/control-images`, {
                 method: 'POST',
                 body: formData
               });

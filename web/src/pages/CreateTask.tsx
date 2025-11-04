@@ -61,7 +61,7 @@ import {
   type SelectOption
 } from "../ui/HeroFormControls";
 import GroupCard from "../ui/GroupCard";
-import { trainingApi, API_BASE_URL } from "../services/api";
+import { trainingApi, getApiBaseUrl } from "../services/api";
 // import { BigInput, BigSelect, SwitchTile } from "../ui/Input";
 
 /* ========= 类型定义 ========= */
@@ -249,7 +249,7 @@ export default function CreateTask() {
       return; // 有缓存就不再请求
     }
 
-    fetch(`${API_BASE_URL}/training/models`)
+    fetch(`${getApiBaseUrl()}/training/models`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((response) => {
         const list: ModelSummary[] = response.data;
@@ -287,7 +287,7 @@ export default function CreateTask() {
       }
     } catch {}
 
-    fetch(`${API_BASE_URL}/training/config/${encodeURIComponent(typeName)}`)
+    fetch(`${getApiBaseUrl()}/training/config/${encodeURIComponent(typeName)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((response) => {
         if (reqId !== modelReqIdRef.current) return; // 非最新响应则忽略
@@ -329,7 +329,7 @@ export default function CreateTask() {
   useEffect(() => {
     // GPU数据获取
     if (_gpusCache === null) {
-      fetch(`${API_BASE_URL}/system/gpus`)
+      fetch(`${getApiBaseUrl()}/system/gpus`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((response) => {
           const gpuList = response.data || [];
@@ -346,7 +346,7 @@ export default function CreateTask() {
 
     // 数据集数据获取
     if (_datasetsCache === null) {
-      fetch(`${API_BASE_URL}/datasets`)
+      fetch(`${getApiBaseUrl()}/datasets`)
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((response) => {
           const datasetList = response.data || [];
@@ -549,7 +549,7 @@ export default function CreateTask() {
         config: cleanConfig
       };
 
-      const res = await fetch(`${API_BASE_URL}/training/tasks`, {
+      const res = await fetch(`${getApiBaseUrl()}/training/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestData),

@@ -15,7 +15,7 @@ import {
   type ModelPathsSchema,
   type GroupedModel
 } from "../utils/modelGrouping";
-import { API_BASE_URL, fetchJson, postJson, readinessApi } from "../services/api";
+import { getApiBaseUrl, fetchJson, postJson, readinessApi } from "../services/api";
 import RuntimeInstallModal from "../components/RuntimeInstallModal";
 import WorkspaceSelectModal from "../components/WorkspaceSelectModal";
 import { debounce } from "../utils/debounce";
@@ -158,7 +158,7 @@ export default function SettingsPage() {
       try {
         setSaving(true);
 
-        const response = await fetch(`${API_BASE_URL}/settings`, {
+        const response = await fetch(`${getApiBaseUrl()}/settings`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",

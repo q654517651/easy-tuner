@@ -1122,15 +1122,37 @@ set "PYTHONIOENCODING=utf-8"
                     log_callback(exc_msg)
 
             finally:
-                # 清理进程引用
+                # 🔧 增强进程清理逻辑，确保子进程不阻塞
                 if self._proc:
                     try:
                         if self._proc.poll() is None:
+                            log_info("终止训练进程...")
                             self._proc.terminate()
-                            self._proc.wait(timeout=5)
-                    except:
-                        pass
-                    self._proc = None
+                            try:
+                                self._proc.wait(timeout=10)
+                                log_info("训练进程已正常终止")
+                            except subprocess.TimeoutExpired:
+                                log_warning("进程未响应terminate，强制kill")
+                                self._proc.kill()
+                                self._proc.wait(timeout=5)
+                                log_info("训练进程已强制终止")
+                        
+                        # 🔧 关闭输出流，防止管道阻塞
+                        if self._proc.stdout and not self._proc.stdout.closed:
+                            try:
+                                self._proc.stdout.close()
+                            except:
+                                pass
+                        if self._proc.stderr and not self._proc.stderr.closed:
+                            try:
+                                self._proc.stderr.close()
+                            except:
+                                pass
+                                
+                    except Exception as e:
+                        log_error(f"清理进程失败: {e}")
+                    finally:
+                        self._proc = None
 
             # 再次检查是否在处理过程中被取消
             if self._cancelled:
@@ -1178,12 +1200,17 @@ set "PYTHONIOENCODING=utf-8"
                           log_callback: Optional[Callable[[str], None]] = None,
                           log_file=None,
                           log_sink: Optional[LogSink] = None) -> bool:
-        """监控训练进度"""
+        """监控训练进度（带超时保护，防止子进程阻塞）"""
         try:
             if not self._proc:
                 return False
 
             error_lines = []  # 收集错误输出
+            
+            # 🔧 添加超时保护机制，防止 readline 永久阻塞
+            import time
+            last_output_time = time.time()
+            no_output_timeout = 60  # 60秒无输出则检查进程状态
 
             while True:
                 # 检查是否被取消
@@ -1195,11 +1222,25 @@ set "PYTHONIOENCODING=utf-8"
                         self._emit_log("训练被取消", "warning")
                     return False
 
+                # 🔧 超时保护：定期检查进程状态，避免因子进程持有管道而永久阻塞
+                current_time = time.time()
+                if current_time - last_output_time > no_output_timeout:
+                    return_code = self._proc.poll()
+                    if return_code is not None:
+                        # 进程已退出但 readline 可能被子进程阻塞
+                        log_info(f"检测到进程已退出（超时保护触发），退出码: {return_code}")
+                        break  # 强制退出监控循环
+                    else:
+                        # 进程还在运行，重置计时器继续等待
+                        log_info("进程仍在运行但长时间无输出，继续等待...")
+                        last_output_time = current_time
+
                 output = self._proc.stdout.readline()
                 if output == '' and self._proc.poll() is not None:
                     break
 
                 if output:
+                    last_output_time = time.time()  # 🔧 重置超时计时器
                     line = output.strip()
 
                     # 过滤重复行：与上一行完全相同则跳过
@@ -1256,6 +1297,8 @@ set "PYTHONIOENCODING=utf-8"
 
             # 检查训练结果
             return_code = self._proc.poll()
+            log_info(f"训练监控结束，进程退出码: {return_code}")
+            
             if return_code == 0:
                 success_msg = f"训练完成: {task.name}"
                 if log_sink is not None:
@@ -1265,8 +1308,7 @@ set "PYTHONIOENCODING=utf-8"
                 log_success(success_msg)
                 
                 # 确保最终日志能够发送到前端
-                import time
-                time.sleep(0.1)  # 短暂等待，确保日志事件被处理
+                time.sleep(0.2)  # 🔧 稍微延长等待时间，确保日志和状态都能推送
 
                 if progress_callback:
                     progress_callback({"state": "completed"})
@@ -1285,8 +1327,7 @@ set "PYTHONIOENCODING=utf-8"
                 log_error(error_msg)
                 
                 # 确保最终日志能够发送到前端
-                import time
-                time.sleep(0.1)  # 短暂等待，确保日志事件被处理
+                time.sleep(0.2)  # 🔧 稍微延长等待时间
                 
                 if progress_callback:
                     progress_callback({
