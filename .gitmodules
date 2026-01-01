@@ -1,0 +1,3 @@
+[submodule "backend/engines/musubi-tuner"]
+	path = backend/engines/musubi-tuner
+	url = https://github.com/kohya-ss/musubi-tuner.git
