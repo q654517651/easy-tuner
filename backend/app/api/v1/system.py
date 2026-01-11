@@ -187,8 +187,9 @@ async def workspace_status():
             try:
                 paths = get_paths()
                 root = paths.workspace_root
-            except:
+            except Exception as e:
                 # 回退：使用配置中的路径
+                log_warning(f"无法从环境获取 workspace_root，使用配置值: {e}")
                 root = Path(workspace_root).resolve()
             
             # 自动创建目录

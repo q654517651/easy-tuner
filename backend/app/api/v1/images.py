@@ -1,5 +1,5 @@
 """
-图片处理 API：批量裁剪（覆盖原图）
+图片处理 API：批量裁剪（覆盖原图）+ 临时控制图上传
 
 约定：
 - 一律使用 cover 模式（长边贴边，铺满画布，不留空白）。
@@ -7,11 +7,13 @@
 - 前端推荐上传 transform（scale, offset_x, offset_y），后端统一反算源裁剪框。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from starlette.concurrency import run_in_threadpool
 from pathlib import Path
+import uuid
+import shutil
 
 from ...core.environment import get_paths
 from ...utils.logger import log_info, log_warning, log_error
@@ -20,6 +22,9 @@ from PIL import Image, ImageOps
 
 
 router = APIRouter()
+
+# 控制图上传限制
+MAX_CONTROL_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 class TransformParams(BaseModel):
@@ -272,3 +277,53 @@ async def crop_images_batch(request: BatchCropRequest):
         }
 
     return await run_in_threadpool(_run)
+
+
+@router.post("/images/upload/temp-control-image")
+async def upload_temp_control_image(file: UploadFile = File(...)):
+    """上传临时控制图，返回 temp_id（用于训练采样）"""
+
+    # 1. 验证 MIME type
+    if file.content_type not in ['image/png', 'image/jpeg']:
+        raise HTTPException(400, "只支持 PNG 和 JPG 格式")
+
+    # 2. 验证扩展名
+    ext = Path(file.filename or "image.png").suffix.lower()
+    if ext not in ['.png', '.jpg', '.jpeg']:
+        raise HTTPException(400, "文件扩展名必须是 .png 或 .jpg")
+
+    # 3. 创建临时目录
+    temp_dir = get_paths().workspace_root / "temp" / "control_images"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # 4. 生成唯一文件名（temp_id）
+    temp_id = f"control_{uuid.uuid4().hex}{ext}"
+    temp_path = temp_dir / temp_id
+
+    # 5. 流式写入 + 大小校验（边写边算）
+    total_size = 0
+    try:
+        with temp_path.open("wb") as f:
+            while chunk := await file.read(8192):  # 8KB 分块
+                total_size += len(chunk)
+                if total_size > MAX_CONTROL_IMAGE_SIZE:
+                    # 超限立即抛异常，由 except 统一清理
+                    raise HTTPException(400, "文件大小超过限制（最大 10MB）")
+                f.write(chunk)
+    except HTTPException:
+        # HTTPException 也需要清理临时文件
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+        raise
+    except Exception as e:
+        # 写入失败，清理文件
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+        log_error(f"临时控制图保存失败: {e}")
+        raise HTTPException(500, f"文件保存失败: {str(e)}")
+
+    log_info(f"临时控制图上传成功: {temp_id} ({total_size} bytes)")
+
+    # 6. 返回 temp_id（不返回绝对路径）
+    return {"temp_id": temp_id}
+

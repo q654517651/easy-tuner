@@ -22,9 +22,20 @@ interface TagManagerProps {
   datasetId: string;
   mediaItems: MediaItem[];
   onTagsUpdated?: () => void; // 标签更新后的回调，用于刷新父组件数据
+  // 无限滚动支持
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
-export default function TagManager({ datasetId, mediaItems, onTagsUpdated }: TagManagerProps) {
+export default function TagManager({
+  datasetId,
+  mediaItems,
+  onTagsUpdated,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore
+}: TagManagerProps) {
   const [selectedImageId, setSelectedImageId] = useState<string>("");
   const [tagStats, setTagStats] = useState<TagStat[]>([]);
   const [loadingTagStats, setLoadingTagStats] = useState(false);
@@ -175,6 +186,9 @@ export default function TagManager({ datasetId, mediaItems, onTagsUpdated }: Tag
             images={items}
             selectedImageId={selectedImageId}
             onImageSelect={handleImageSelect}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={onLoadMore}
           />
         </div>
 

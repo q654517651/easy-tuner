@@ -106,9 +106,27 @@ class EnvironmentManager:
         # 5) runtime python（跨平台检测）
         runtime_python = self._detect_runtime_python(runtime_dir)
 
-        # 6) 引擎路径（从 workspace/runtime/engines 读取）
-        engines_dir = runtime_dir / "engines"
-        musubi_dir = engines_dir / "musubi-tuner"
+        # 6) ✨ 新架构：引擎路径优先使用打包的训练器
+        # 优先级：backend/engines/musubi-tuner（打包） > workspace/runtime/engines/musubi-tuner（旧架构）
+        musubi_bundled = backend_root / "engines" / "musubi-tuner"
+        musubi_workspace = runtime_dir / "engines" / "musubi-tuner"
+
+        if musubi_bundled.exists() and (musubi_bundled / "src").exists():
+            # 使用打包的训练器（推荐）
+            musubi_dir = musubi_bundled
+            engines_dir = backend_root / "engines"
+            log_info(f"[EnvironmentManager] ✅ 使用打包的训练器: {musubi_dir}")
+        elif musubi_workspace.exists() and (musubi_workspace / "src").exists():
+            # 兼容旧架构（workspace 中的训练器）
+            musubi_dir = musubi_workspace
+            engines_dir = runtime_dir / "engines"
+            log_warning(f"[EnvironmentManager] ⚠️ 使用 workspace 中的训练器（旧架构）: {musubi_dir}")
+        else:
+            # 默认使用打包路径（即使不存在，也为后续错误提示准备）
+            musubi_dir = musubi_bundled
+            engines_dir = backend_root / "engines"
+            log_warning(f"[EnvironmentManager] ⚠️ 训练器不存在: {musubi_dir}")
+
         musubi_src = musubi_dir / "src"
 
         # 7) 安装脚本路径（保留旧路径用于向后兼容，但实际使用 Python 脚本）
@@ -136,6 +154,7 @@ class EnvironmentManager:
         log_info(f"[EnvironmentManager] backend_root={backend_root}")
         log_info(f"[EnvironmentManager] ✨ runtime_dir={runtime_dir} (workspace-based)")
         log_info(f"[EnvironmentManager] workspace_root={ws_path}")
+        log_info(f"[EnvironmentManager] musubi_dir={musubi_dir} (bundled={musubi_dir == musubi_bundled})")
 
     def _detect_project_root(self) -> Path:
         """

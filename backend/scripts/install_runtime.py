@@ -489,31 +489,131 @@ def install_dependencies(python_exe: Path, runtime_dir: Path, use_mirror: bool, 
 
     success("依赖安装完成")
 
-    # ✨ 步骤 3.5: 将 musubi-tuner 注册到 Python 环境（解决模块导入问题）
-    info("将 musubi-tuner 注册到 Python 环境...")
-    musubi_dir = runtime_dir / "engines" / "musubi-tuner"  # ✅ 根目录，不是 src
-    if musubi_dir.exists() and (musubi_dir / "pyproject.toml").exists():
-        try:
+    # ✨ 步骤 2.5: 确保训练器正确绑定到打包版本（幂等修复逻辑）
+    info("检查训练器绑定状态...")
+
+    try:
+        # 检测 backend 根目录
+        script_dir = Path(__file__).resolve().parent  # .../backend/scripts
+        backend_root = script_dir.parent  # .../backend
+
+        # 唯一权威来源：打包的训练器（bundled）
+        musubi_bundled = backend_root / "engines" / "musubi-tuner"
+
+        if not (musubi_bundled.exists() and (musubi_bundled / "pyproject.toml").exists()):
+            warning("  ⚠️ 未找到打包的训练器，跳过绑定步骤")
+            warning(f"     期望路径: {musubi_bundled}")
+            return True
+
+        info(f"  ✅ 找到打包的训练器: {musubi_bundled}")
+
+        # 【步骤1】检查是否已安装（pip show）
+        pip_show_result = subprocess.run(
+            [str(python_exe), "-m", "pip", "show", "musubi-tuner"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        needs_rebind = False
+
+        if pip_show_result.returncode != 0:
+            # 未安装
+            info("  📌 训练器未安装，准备首次绑定")
+            needs_rebind = True
+
+        else:
+            # 【步骤2】已安装，尝试 import（判断是否有依赖问题）
+            import_check = 'import musubi_tuner; print(musubi_tuner.__file__)'
+            import_result = subprocess.run(
+                [str(python_exe), "-c", import_check],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if import_result.returncode != 0:
+                # 已安装但 import 失败 → 依赖/运行时问题
+                warning("  ⚠️ 训练器已安装但无法 import，可能缺少依赖")
+                error_msg = import_result.stderr.strip()
+                if error_msg:
+                    warning(f"     错误: {error_msg[:200]}")
+                warning("     提示: 请检查依赖是否完整安装，重新绑定无法解决此问题")
+                return True  # 不重绑，因为重绑解决不了依赖问题
+
+            else:
+                # 【步骤3】import 成功，检查 __file__ 是否在 bundled 目录树下
+                current_file = Path(import_result.stdout.strip()).resolve()
+                bundled_resolved = musubi_bundled.resolve()
+
+                try:
+                    # 判断是否在目录树下
+                    current_file.relative_to(bundled_resolved)
+                    # 在目录树下 → 绑定正确
+                    success("  ✅ 训练器已正确绑定到打包版本")
+                    info(f"     路径: {current_file}")
+                    needs_rebind = False
+
+                except ValueError:
+                    # 不在目录树下 → 绑定到错误路径
+                    warning("  ⚠️ 当前绑定路径不正确")
+                    warning(f"     当前: {current_file}")
+                    warning(f"     期望: {bundled_resolved}")
+                    info("  📌 准备修复绑定")
+                    needs_rebind = True
+
+        # 【执行绑定/重新绑定】
+        if needs_rebind:
+            # 1. 卸载旧绑定（忽略错误，因为可能未安装）
+            info("  🔄 卸载旧绑定...")
+            subprocess.run(
+                [str(python_exe), "-m", "pip", "uninstall", "musubi-tuner", "-y"],
+                capture_output=True,
+                timeout=30
+            )
+
+            # 2. 绑定到打包版本
+            info("  🔗 绑定到打包版本...")
             result = subprocess.run(
-                [str(python_exe), "-m", "pip", "install", "-e", str(musubi_dir),
+                [str(python_exe), "-m", "pip", "install", "-e", str(musubi_bundled),
                  "--no-deps", "--no-build-isolation"],
-                env=env,  # 使用相同的环境变量（镜像源）
+                env=env,  # 使用相同的镜像源
                 capture_output=True,
                 text=True,
                 timeout=60
             )
-            if result.returncode == 0:
-                success("✅ musubi-tuner 已注册到 Python 环境（可编辑模式）")
-                info("  从此无需手动设置 PYTHONPATH，训练脚本可直接 import musubi_tuner")
+
+            if result.returncode != 0:
+                warning(f"  ⚠️ 训练器绑定失败: {result.stderr}")
+                warning("     训练时将依赖 PYTHONPATH 环境变量（可能不稳定）")
+                return True
+
+            # 3. 验证绑定结果
+            info("  ✅ 验证绑定结果...")
+            verify_result = subprocess.run(
+                [str(python_exe), "-c", import_check],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if verify_result.returncode == 0:
+                new_path = Path(verify_result.stdout.strip()).resolve()
+                try:
+                    new_path.relative_to(bundled_resolved)
+                    success("  ✅ 训练器已成功绑定到打包版本")
+                    info(f"     路径: {new_path}")
+                except ValueError:
+                    warning(f"  ⚠️ 绑定后验证失败，当前路径: {new_path}")
             else:
-                warning(f"musubi-tuner 注册失败: {result.stderr}")
-                warning("  训练时将依赖 PYTHONPATH 环境变量（可能不稳定）")
-        except subprocess.TimeoutExpired:
-            warning("musubi-tuner 注册超时")
-        except Exception as e:
-            warning(f"musubi-tuner 注册异常: {e}")
-    else:
-        warning("musubi-tuner 目录或 pyproject.toml 不存在，跳过注册")
+                warning("  ⚠️ 绑定后无法 import，可能存在其他问题")
+
+    except subprocess.TimeoutExpired:
+        warning("训练器绑定超时")
+    except Exception as e:
+        warning(f"训练器绑定异常: {e}")
+        import traceback
+        warning(traceback.format_exc())
 
     return True
 
@@ -607,22 +707,11 @@ def run_install(runtime_dir_str: str, use_china_mirror: bool = False) -> int:
         warning("安装已取消（在步骤 1 之前）")
         return 2
 
-    # 步骤1: 克隆 Musubi
-    info("步骤 1/3: 克隆 musubi-tuner...")
-    if not clone_musubi(runtime_dir, use_china_mirror):
-        if is_cancelled():
-            warning("Musubi 克隆已取消")
-            return 2
-        error("Musubi 克隆失败")
-        return 1
+    # ✨ 新架构：不再克隆 musubi-tuner（已作为 Git 子模块打包在 backend/engines/）
+    info("✅ 训练器已随应用打包，跳过下载步骤")
 
-    # 检查取消标志
-    if is_cancelled():
-        warning("安装已取消（步骤 1 完成后）")
-        return 2
-
-    # 步骤2: 安装 Python
-    info(f"步骤 2/3: 安装 Python 环境（{platform.system()}）...")
+    # 步骤1: 安装 Python
+    info(f"步骤 1/2: 安装 Python 环境（{platform.system()}）...")
     if is_windows:
         python_exe = install_python_windows(runtime_dir)
     else:
@@ -637,11 +726,11 @@ def run_install(runtime_dir_str: str, use_china_mirror: bool = False) -> int:
 
     # 检查取消标志
     if is_cancelled():
-        warning("安装已取消（步骤 2 完成后）")
+        warning("安装已取消（步骤 1 完成后）")
         return 2
 
-    # 步骤3: 安装依赖
-    info("步骤 3/3: 安装 Python 依赖...")
+    # 步骤2: 安装依赖
+    info("步骤 2/2: 安装 Python 依赖...")
     if not install_dependencies(python_exe, runtime_dir, use_china_mirror, is_windows):
         if is_cancelled():
             warning("依赖安装已取消")

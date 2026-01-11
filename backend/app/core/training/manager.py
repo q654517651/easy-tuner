@@ -134,6 +134,47 @@ class TrainingManager:
             # 创建任务目录结构
             self._create_task_directory_structure(task_dir)
 
+            # 处理采样控制图（如果有）
+            sample_control_temp_id = getattr(config, 'sample_control_image', '').strip()
+            if sample_control_temp_id:
+                # 构建临时文件路径（从 temp_id 还原）
+                temp_dir = self.workspace_root / "temp" / "control_images"
+                temp_path = temp_dir / sample_control_temp_id
+
+                if temp_path.exists():
+                    try:
+                        # 创建任务控制图目录
+                        task_control_dir = task_dir / "control"
+                        task_control_dir.mkdir(exist_ok=True)
+
+                        # 拷贝到任务目录（保留原扩展名）
+                        dest_filename = f"sample_control{temp_path.suffix}"
+                        dest_path = task_control_dir / dest_filename
+                        import shutil
+                        shutil.copy2(temp_path, dest_path)
+
+                        # 更新为相对路径（相对于任务目录）
+                        config.sample_control_image = f"control/{dest_filename}"
+
+                        log_info(f"已拷贝采样控制图: {temp_path.name} -> {dest_path}")
+
+                        # 拷贝成功后尝试删除临时文件（失败不影响业务）
+                        try:
+                            temp_path.unlink()
+                            log_info(f"已清理临时文件: {temp_path}")
+                        except Exception as unlink_err:
+                            # 删除失败只记录警告，不清空 config，不影响任务创建
+                            log_warning(f"清理临时文件失败（不影响任务）: {unlink_err}")
+
+                    except Exception as e:
+                        # 仅拷贝失败时才清空配置
+                        log_error(f"拷贝采样控制图失败: {e}")
+                        config.sample_control_image = ""
+                else:
+                    # 临时文件不存在：记录警告，清空字段
+                    log_warning(f"采样控制图临时文件不存在，已忽略: {sample_control_temp_id}")
+                    config.sample_control_image = ""
+
             # 生成训练工件
             await self._generate_training_artifacts(task)
 
@@ -953,7 +994,9 @@ class TrainingManager:
                     # 注意：这里不能await，因为我们在同步函数中
                     # 实际应用中可能需要重构为异步
                     pass
-            except:
+            except RuntimeError as e:
+                # 没有运行的事件循环，跳过异步状态更新
+                log_warning(f"无法获取事件循环状态: {e}")
                 pass
 
             task_data = {
@@ -1049,20 +1092,31 @@ class TrainingManager:
     def _rebuild_task_from_data(self, task_data: dict) -> Optional[TrainingTask]:
         """从数据重建任务对象"""
         try:
-            # 重建配置对象
-            config_class_name = task_data.get("config_class", "QwenImageConfig")
-            config_data = task_data.get("config", {})
+            # 获取训练类型（必需）
+            training_type = task_data.get("training_type")
+            if not training_type:
+                log_error(f"任务 {task_data.get('id', 'unknown')} 缺少 training_type，无法重建")
+                return None
 
+            # 通过注册表动态获取配置类
             try:
                 from .models import get_model
-                training_type = task_data.get("training_type", "qwen_image_lora")
                 spec = get_model(training_type)
                 config_cls = spec.config_cls
+            except KeyError:
+                log_error(f"未知的模型类型: {training_type}，任务 {task_data.get('id', 'unknown')} 无法重建")
+                return None
+            except Exception as e:
+                log_error(f"获取模型规范失败 ({training_type}): {e}")
+                return None
+
+            # 重建配置对象
+            config_data = task_data.get("config", {})
+            try:
                 config = config_cls(**config_data)
             except Exception as e:
-                log_error(f"重建配置失败: {e}")
-                from .models import QwenImageConfig
-                config = QwenImageConfig(**config_data)
+                log_error(f"重建配置对象失败 ({training_type}): {e}")
+                return None
 
             # 重建任务对象
             task = TrainingTask(

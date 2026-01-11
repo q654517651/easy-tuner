@@ -607,7 +607,8 @@ class DatasetService:
                     import os
                     try:
                         os.unlink(temp_file_path)
-                    except:
+                    except OSError as e:
+                        log_warning(f"清理临时文件失败: {temp_file_path}, 错误: {e}")
                         pass
 
             except Exception as e:

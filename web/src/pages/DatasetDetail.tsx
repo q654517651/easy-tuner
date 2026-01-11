@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { Tabs, Tab, CircularProgress, addToast, Input } from "@heroui/react";
 import HeaderBar from "../ui/HeaderBar";
@@ -62,6 +62,28 @@ export default function DatasetDetail() {
   const [labelingItems, setLabelingItems] = useState<Set<string>>(new Set());
   const [labelingProgress, setLabelingProgress] = useState(0);
 
+  // 批量打标取消控制器
+  const batchLabelingAbortRef = useRef<AbortController | null>(null);
+
+  // 组件卸载时取消批量打标
+  useEffect(() => {
+    return () => {
+      if (batchLabelingAbortRef.current) {
+        batchLabelingAbortRef.current.abort();
+        batchLabelingAbortRef.current = null;
+      }
+    };
+  }, []);
+
+  // 无限滚动分页状态
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const scrollLabelingRef = useRef<HTMLDivElement>(null); // labeling tab 滚动容器
+  const scrollCroppingRef = useRef<HTMLDivElement>(null); // cropping tab 滚动容器
+  const sentinelLabelingRef = useRef<HTMLDivElement>(null); // labeling tab sentinel
+  const sentinelCroppingRef = useRef<HTMLDivElement>(null); // cropping tab sentinel
+
   // 裁剪相关状态
   const [cropWidth, setCropWidth] = useState(1024);
   const [cropHeight, setCropHeight] = useState(1024);
@@ -85,20 +107,25 @@ export default function DatasetDetail() {
     setItems([]);
     setError(null);
     setSelectedItems(new Set());
+    setCurrentPage(1);
+    setHasMore(true);
   }, [id]);
 
-  // 获取数据集详情
+  // 获取数据集详情（初始加载）
   useEffect(() => {
     const fetchDataset = async () => {
       if (!id) return;
 
       try {
-        const data = await datasetApi.getDataset(id);
+        const data = await datasetApi.getDataset(id, 1, 100);
         if (data) {
           setDataset(data);
           // 转换媒体文件格式
           const mediaItems = (data.media_items ?? []).map(toMediaItem);
           setItems(mediaItems);
+
+          // 判断是否还有更多数据
+          setHasMore(mediaItems.length === 100);
         }
         setError(null);
       } catch (err) {
@@ -111,6 +138,69 @@ export default function DatasetDetail() {
 
     fetchDataset();
   }, [id]);
+
+  // 加载更多数据（使用 useCallback 避免闭包问题）
+  const loadMore = useCallback(async () => {
+    if (!id || !hasMore || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const nextPage = currentPage + 1;
+      const data = await datasetApi.getDataset(id, nextPage, 100);
+
+      if (data) {
+        const newItems = (data.media_items ?? []).map(toMediaItem);
+
+        // 追加新数据
+        setItems(prev => [...prev, ...newItems]);
+        setCurrentPage(nextPage);
+
+        // 判断是否还有更多
+        setHasMore(newItems.length === 100);
+      }
+    } catch (err) {
+      console.error('加载更多失败:', err);
+      addToast({
+        title: "加载失败",
+        description: "无法加载更多图片",
+        color: "danger",
+        timeout: 3000,
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [id, hasMore, loadingMore, currentPage]);
+
+  // 无限滚动监听
+  useEffect(() => {
+    // 等待数据加载完成后再设置 observer
+    if (loading || items.length === 0) return;
+
+    // 根据当前 tab 选择正确的滚动容器和 sentinel
+    const root = selectedTab === "labeling" ? scrollLabelingRef.current : scrollCroppingRef.current;
+    const target = selectedTab === "labeling" ? sentinelLabelingRef.current : sentinelCroppingRef.current;
+
+    if (!root || !target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadMore();
+        }
+      },
+      {
+        root: root,
+        threshold: 0.1,
+        rootMargin: "200px" // 提前 200px 触发加载
+      }
+    );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [selectedTab, loadMore, hasMore, loadingMore, loading, items.length]);
 
   const handleDelete = async (rid: string) => {
     const item = items.find(x => x.id === rid);
@@ -312,10 +402,12 @@ export default function DatasetDetail() {
         timeout: 3000,
       });
 
-      // 4) 刷新数据集并强制刷新图片显示
+      // 4) 刷新数据集并强制刷新图片显示（重置分页）
       if (id) {
         try {
-          const data = await datasetApi.getDataset(id);
+          setCurrentPage(1);
+          setHasMore(true);
+          const data = await datasetApi.getDataset(id, 1, 100);
           if (data) {
             setDataset(data as any);
             const v = Date.now();
@@ -328,6 +420,7 @@ export default function DatasetDetail() {
               }))
             }));
             setItems(mediaItems);
+            setHasMore(mediaItems.length === 100);
           }
         } catch (e) {
           console.error('刷新裁剪后数据集失败:', e);
@@ -469,6 +562,10 @@ export default function DatasetDetail() {
   const handleBatchLabeling = async () => {
     if (selectedItems.size === 0 || batchLabeling) return;
 
+    // 创建新的 AbortController
+    const abortController = new AbortController();
+    batchLabelingAbortRef.current = abortController;
+
     setBatchLabeling(true);
     setLabelingItems(new Set(selectedItems));
     setLabelingProgress(0);
@@ -476,9 +573,16 @@ export default function DatasetDetail() {
     const selectedItemsList = Array.from(selectedItems);
     let completedCount = 0;
     let successCount = 0;
+    let aborted = false;
 
     try {
       for (const itemId of selectedItemsList) {
+        // 检查是否已被取消
+        if (abortController.signal.aborted) {
+          aborted = true;
+          break;
+        }
+
         const item = items.find(x => x.id === itemId);
         if (!item) {
           completedCount++;
@@ -487,8 +591,8 @@ export default function DatasetDetail() {
         }
 
         try {
-          // 调用单张打标API
-          const result = await labelingApi.labelSingle(id!, item.filename);
+          // 调用单张打标API，传入 signal
+          const result = await labelingApi.labelSingle(id!, item.filename, undefined, abortController.signal);
           const caption = result.caption || "";
 
           // 更新item的标签
@@ -512,7 +616,13 @@ export default function DatasetDetail() {
           completedCount++;
           setLabelingProgress((completedCount / selectedItemsList.length) * 100);
 
-        } catch (error) {
+        } catch (error: any) {
+          // 如果是取消导致的错误，跳出循环
+          if (error?.name === 'AbortError' || abortController.signal.aborted) {
+            aborted = true;
+            break;
+          }
+
           console.error(`打标失败 ${item.filename}:`, error);
 
           // 即使失败也要从正在打标的集合中移除
@@ -527,11 +637,22 @@ export default function DatasetDetail() {
         }
       }
     } finally {
+      // 清理 AbortController 引用
+      if (batchLabelingAbortRef.current === abortController) {
+        batchLabelingAbortRef.current = null;
+      }
+
       // 批量打标完成，清理状态
       setBatchLabeling(false);
       setLabelingItems(new Set());
       setSelectedItems(new Set());
       setLabelingProgress(0);
+
+      // 如果是被取消的，不显示完成通知
+      if (aborted) {
+        console.log('批量打标已取消');
+        return;
+      }
 
       // 显示完成通知，根据成功数量判断结果
       const totalCount = selectedItemsList.length;
@@ -672,11 +793,15 @@ export default function DatasetDetail() {
           }
         }
 
-        // 刷新数据集
-        const updatedDataset = await datasetApi.getDataset(id);
+        // 刷新数据集（重置分页从第一页开始）
+        setCurrentPage(1);
+        setHasMore(true);
+        const updatedDataset = await datasetApi.getDataset(id, 1, 100);
         if (updatedDataset) {
           setDataset(updatedDataset);
-          setItems(updatedDataset.media_items.map(toMediaItem));
+          const mediaItems = (updatedDataset.media_items ?? []).map(toMediaItem);
+          setItems(mediaItems);
+          setHasMore(mediaItems.length === 100);
         }
 
         // 显示上传结果
@@ -989,14 +1114,21 @@ export default function DatasetDetail() {
                   <TagManager
                     datasetId={id!}
                     mediaItems={items}
+                    hasMore={hasMore}
+                    loadingMore={loadingMore}
+                    onLoadMore={loadMore}
                     onTagsUpdated={() => {
-                      // 标签更新后重新获取数据集信息，刷新统计数据
+                      // 标签更新后重新获取数据集信息，刷新统计数据（重置分页）
                       const fetchDataset = async () => {
                         try {
-                          const data = await datasetApi.getDataset(id!);
+                          setCurrentPage(1);
+                          setHasMore(true);
+                          const data = await datasetApi.getDataset(id!, 1, 100);
                           if (data) {
                             setDataset(data);
-                            setItems(data.media_items.map(toMediaItem));
+                            const mediaItems = (data.media_items ?? []).map(toMediaItem);
+                            setItems(mediaItems);
+                            setHasMore(mediaItems.length === 100);
                           }
                         } catch (err) {
                           console.error('刷新数据集失败:', err);
@@ -1009,7 +1141,7 @@ export default function DatasetDetail() {
 
                 {/* 打标页面 - 使用 display 控制显示/隐藏 */}
                 <div className={`h-full ${selectedTab === "labeling" ? "block" : "hidden"}`}>
-                  <div className="h-full overflow-y-auto">
+                  <div ref={scrollLabelingRef} className="h-full overflow-y-auto">
                     <div className="px-6 py-6">
                       <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
                         {items.map((item) => {
@@ -1035,13 +1167,33 @@ export default function DatasetDetail() {
                           );
                         })}
                       </div>
+
+                      {/* 无限滚动加载指示器 */}
+                      <div ref={sentinelLabelingRef} className="flex justify-center py-8">
+                        {loadingMore && (
+                          <div className="flex items-center gap-2 text-default-500">
+                            <CircularProgress size="sm" aria-label="加载中" />
+                            <span className="text-sm">加载更多图片...</span>
+                          </div>
+                        )}
+                        {!hasMore && items.length > 0 && (
+                          <div className="text-sm text-default-400">
+                            已加载全部 {items.length} 张图片
+                          </div>
+                        )}
+                        {items.length === 0 && !loading && (
+                          <div className="text-sm text-default-400">
+                            暂无图片
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 {/* 图片裁剪页面 */}
                 <div className={`h-full ${selectedTab === "cropping" ? "block" : "hidden"}`}>
-                  <div className="h-full overflow-y-auto">
+                  <div ref={scrollCroppingRef} className="h-full overflow-y-auto">
                     <div className="px-6 py-6">
                       <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-5">
                         {items.map((item) => (
@@ -1068,6 +1220,26 @@ export default function DatasetDetail() {
                             }}
                           />
                         ))}
+                      </div>
+
+                      {/* 无限滚动加载指示器 */}
+                      <div ref={sentinelCroppingRef} className="flex justify-center py-8">
+                        {loadingMore && (
+                          <div className="flex items-center gap-2 text-default-500">
+                            <CircularProgress size="sm" aria-label="加载中" />
+                            <span className="text-sm">加载更多图片...</span>
+                          </div>
+                        )}
+                        {!hasMore && items.length > 0 && (
+                          <div className="text-sm text-default-400">
+                            已加载全部 {items.length} 张图片
+                          </div>
+                        )}
+                        {items.length === 0 && !loading && (
+                          <div className="text-sm text-default-400">
+                            暂无图片
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

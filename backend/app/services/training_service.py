@@ -14,7 +14,7 @@ from ..models.training import (
 from ..core.training.manager import get_training_manager
 from ..core.training.models import (
     list_models, get_model, get_fields_by_group, build_cli_args,
-    ParameterGroup as CoreParameterGroup, QwenImageConfig, field_enabled,
+    ParameterGroup as CoreParameterGroup, field_enabled,
     build_toml_dict, dumps_toml
 )
 from ..core.dataset.manager import get_dataset_manager
@@ -99,7 +99,21 @@ class TrainingService:
 
                     # 获取当前值和默认值（当前值可能已经从设置中注入）
                     current_value = getattr(config_instance, field_name)
-                    default_value = getattr(field_obj, 'default', None)
+
+                    # 处理 dataclass 的默认值（避免序列化 MISSING 对象）
+                    from dataclasses import MISSING
+                    if field_obj.default is not MISSING:
+                        # 有普通默认值
+                        default_value = field_obj.default
+                    elif field_obj.default_factory is not MISSING:  # type: ignore
+                        # 有工厂函数，调用它获取默认值
+                        try:
+                            default_value = field_obj.default_factory()  # type: ignore
+                        except Exception:
+                            default_value = None
+                    else:
+                        # 没有默认值
+                        default_value = None
 
                     fields.append(ParameterField(
                         name=field_name,
@@ -192,13 +206,17 @@ class TrainingService:
             toml_dict = build_toml_dict(config, datasets)
             toml_content = dumps_toml(toml_dict)
 
-            # 生成批处理脚本
-            rel_to_root_from_script = "../../.."  # 假设在训练目录下
-
-            # ✨ 从环境管理器获取 musubi_src 路径（相对于 workspace_root）
+            # ✨ 从环境管理器获取路径
             from ..core.environment import get_paths
+            import os
             paths = get_paths()
-            musubi_src_rel = paths.musubi_src.relative_to(paths.workspace_root).as_posix()
+
+            # 动态计算从训练目录跳回工作目录的相对路径
+            rel_to_root_from_script = os.path.relpath(paths.workspace_root, training_dir)
+            rel_to_root_win = rel_to_root_from_script.replace("/", "\\")
+
+            # musubi_src 使用绝对路径（不在 workspace 下）
+            musubi_src_abs = str(paths.musubi_src.resolve())
 
             # 构建多行格式
             cmd_lines = []
@@ -213,9 +231,9 @@ class TrainingService:
             multi_line_cmd = "\n".join(cmd_lines)
 
             bat_content = f"""@echo off
-cd /d "%~dp0{rel_to_root_from_script}"
+cd /d "%~dp0{rel_to_root_win}"
 
-set "PYTHONPATH={musubi_src_rel};%PYTHONPATH%"
+set "PYTHONPATH={musubi_src_abs};%PYTHONPATH%"
 set "PYTHONIOENCODING=utf-8"
 
 {multi_line_cmd}
@@ -223,14 +241,14 @@ set "PYTHONIOENCODING=utf-8"
 pause
 """
 
-            # ✨ script_path 也使用环境管理器路径（相对于 workspace_root）
-            script_rel = (paths.musubi_src / spec.script_train).relative_to(paths.workspace_root).as_posix()
+            # script_path 使用绝对路径
+            script_abs = str((paths.musubi_src / spec.script_train).resolve())
 
             return CLIPreviewResponse(
                 command=" ".join(flat_cmd),
-                script_path=script_rel,
+                script_path=script_abs,
                 args=flat_cmd[1:],  # 去掉脚本路径
-                working_directory=str(trainer._PROJECT_ROOT),
+                working_directory=str(paths.workspace_root),  # 工作目录是 workspace_root
                 toml_content=toml_content,
                 toml_path=toml_path,
                 bat_script=bat_content

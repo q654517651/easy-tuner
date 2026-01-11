@@ -282,7 +282,8 @@ class QwenVLProvider(LabelingProvider):
                 try:
                     error_data = json.loads(result.stderr)
                     error_msg = error_data.get("error", result.stderr)
-                except:
+                except json.JSONDecodeError as e:
+                    log_warning(f"无法解析 Qwen-VL 错误信息为 JSON: {e}")
                     error_msg = result.stderr or "未知错误"
                 raise RuntimeError(f"Qwen-VL 推理失败（退出码 {result.returncode}）: {error_msg}")
 

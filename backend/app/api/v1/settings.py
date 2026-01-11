@@ -1,5 +1,5 @@
 """
-设置 API 路由：配置读取、保存与环境修复
+设置 API 路由：配置读取、保存与环境安装
 """
 
 from fastapi import APIRouter, HTTPException, Response
@@ -11,8 +11,6 @@ from pathlib import Path
 
 from ...core.config import get_config, save_config, reload_config
 from ...core.schema_manager import schema_manager
-from ...utils.git_utils import check_submodule_status, get_musubi_releases, clear_musubi_cache
-from ...services.musubi_fix_service import musubi_fix_service
 from ...utils.logger import log_info
 
 
@@ -77,93 +75,12 @@ def serialize_config() -> Dict[str, Any]:
 @router.get("/settings")
 async def get_settings():
     try:
-        # 获取当前 musubi 版本信息（在线程池中执行，避免阻塞事件循环）
-        version_info = await run_in_threadpool(check_submodule_status)
-
-        # 序列化配置
+        # 序列化配置（不再需要 musubi 版本信息）
         config_data = serialize_config()
-
-        # 更新 musubi 版本信息
-        config_data["musubi"]["version"] = version_info.get("version", "")
-        config_data["musubi"]["status"] = version_info.get("status", "unknown")
 
         return {"success": True, "message": "配置获取成功", "data": config_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"配置获取失败: {str(e)}")
-
-
-@router.post("/settings/musubi/check-status")
-async def check_musubi_status():
-    try:
-        # 获取项目根目录（从环境管理器）
-        from ...core.environment import get_paths
-
-        paths = get_paths()
-        project_root = str(paths.project_root)
-
-        # 在线程池中执行，避免阻塞事件循环
-        status_info = await run_in_threadpool(check_submodule_status, project_root)
-
-        # 回写最新状态
-        cfg = get_config()
-        cfg.musubi.status = status_info.get("status", "error")
-        cfg.musubi.version = status_info.get("version", "")
-        cfg.musubi.last_check = status_info.get("commit_date", "")
-        save_config(cfg)
-
-        return {
-            "success": True,
-            "message": "状态已更新",
-            "data": {
-                "status": status_info.get("status", "error"),
-                "version": status_info.get("version", ""),
-                "commit_hash": status_info.get("commit_hash", ""),
-                "commit_date": status_info.get("commit_date", ""),
-                "branch": status_info.get("branch", ""),
-                "message": status_info.get("message", "")
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"状态检查失败: {str(e)}")
-
-
-@router.get("/settings/musubi/releases")
-async def get_musubi_releases_api(limit: int = 10, force_refresh: bool = False):
-    """获取 musubi 发布历史"""
-    try:
-        # 获取项目根目录（从环境管理器）
-        from ...core.environment import get_paths
-
-        paths = get_paths()
-        project_root = str(paths.project_root)
-
-        # 在线程池中执行，避免阻塞事件循环
-        releases = await run_in_threadpool(get_musubi_releases, project_root, min(limit, 20), force_refresh)
-
-        return {
-            "success": True,
-            "message": "发布历史获取成功" + (" (已刷新)" if force_refresh else " (使用缓存)"),
-            "data": releases
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取发布历史失败: {str(e)}")
-
-
-@router.delete("/settings/musubi/releases/cache", status_code=204)
-async def clear_musubi_releases_cache():
-    """清除 musubi 发布历史缓存（返回 204）"""
-    try:
-        # 获取项目根目录（从环境管理器）
-        from ...core.environment import get_paths
-
-        paths = get_paths()
-        project_root = str(paths.project_root)
-
-        # 在线程池中执行，避免阻塞事件循环
-        await run_in_threadpool(clear_musubi_cache, project_root)
-        return Response(status_code=204)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"缓存清除失败: {str(e)}")
 
 
 @router.get("/settings/model-paths/schema")
@@ -306,21 +223,7 @@ class FixEnvironmentRequest(BaseModel):
     locale: Optional[str] = None  # 例如 "zh-CN", "en-US"
 
 
-@router.post("/settings/musubi/fix-environment")
-async def fix_musubi_environment(request: FixEnvironmentRequest = FixEnvironmentRequest()):
-    """修复训练环境（调用 setup_portable_uv.ps1）- 旧版阻塞式"""
-    try:
-        use_china_mirror = request.locale and request.locale.startswith('zh')
-        success, message = await musubi_fix_service.fix_environment(use_china_mirror=use_china_mirror)
-        return {
-            "success": success,
-            "message": message
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"修复训练环境失败: {str(e)}")
-
-
-# ==================== 新的流式安装 API ====================
+# ==================== 流式安装 API（保留）====================
 
 class StartInstallationRequest(BaseModel):
     locale: Optional[str] = None
@@ -408,104 +311,3 @@ async def get_installation_status(installation_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取安装状态失败: {str(e)}")
-
-
-@router.post("/settings/musubi/fix-installation")
-async def fix_musubi_installation():
-    """修复训练安装（musubi-tuner 子模块）"""
-    try:
-        success, message = await musubi_fix_service.fix_trainer_installation()
-        return {
-            "success": success,
-            "message": message
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"修复训练安装失败: {str(e)}")
-
-
-@router.post("/settings/musubi/switch-version")
-async def switch_musubi_version(request: Dict[str, Any]):
-    """切换 musubi-tuner 到指定版本"""
-    try:
-        version = request.get("version")
-        commit_hash = request.get("commit_hash")
-
-        if not version or not commit_hash:
-            raise HTTPException(status_code=400, detail="缺少版本号或commit hash")
-
-        # 获取项目路径
-        from ...core.environment import get_paths
-        paths = get_paths()
-        musubi_dir = paths.musubi_dir
-
-        if not musubi_dir.exists():
-            raise HTTPException(status_code=404, detail="musubi-tuner 目录不存在")
-
-        # 执行 git checkout
-        import subprocess
-        log_info(f"切换 musubi-tuner 到版本: {version} ({commit_hash})")
-
-        # 1. 先 fetch 确保有最新的 tags
-        # 在线程池中执行外部进程，避免阻塞事件循环
-        fetch_result = await run_in_threadpool(
-            subprocess.run,
-            ["git", "fetch", "--tags"],
-            cwd=str(musubi_dir),
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if fetch_result.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"获取远程标签失败: {fetch_result.stderr}"
-            )
-
-        # 2. 切换到指定 commit
-        checkout_result = await run_in_threadpool(
-            subprocess.run,
-            ["git", "checkout", commit_hash],
-            cwd=str(musubi_dir),
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-
-        if checkout_result.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail=f"切换版本失败: {checkout_result.stderr}"
-            )
-
-        log_success(f"成功切换到版本: {version}")
-
-        # 更新配置中的版本信息
-        cfg = get_config()
-        cfg.musubi.version = version
-        save_config(cfg)
-
-        return {
-            "success": True,
-            "message": f"成功切换到版本 {version}"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        log_error(f"切换版本失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"切换版本失败: {str(e)}")
-
-
-@router.get("/settings/musubi/environment-status")
-async def get_musubi_environment_status():
-    """获取训练环境状态"""
-    try:
-        status = await musubi_fix_service.check_environment_status()
-        return {
-            "success": True,
-            "message": "环境状态检查完成",
-            "data": status
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"检查环境状态失败: {str(e)}")

@@ -1,7 +1,7 @@
 {
   "name": "web",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "EasyTuner - AI模型训练数据集管理与标注工具",
   "author": "EasyTuner Team",
   "type": "module",
@@ -123,6 +123,19 @@
         "to": "backend/scripts",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "../backend/engines",
+        "to": "backend/engines",
+        "filter": [
+          "**/*",
+          "!**/.git/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.gitignore",
+          "!**/tests/**",
+          "!**/.github/**"
         ]
       }
     ]

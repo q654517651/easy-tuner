@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Input, Card, CardFooter, Image } from "@heroui/react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Input, Card, CardFooter, Image, CircularProgress } from "@heroui/react";
 import ScrollArea from "./ScrollArea";
 
 // 判断文件类型的工具函数
@@ -20,6 +20,10 @@ interface ImageThumbnailListProps {
   images: MediaItem[];
   selectedImageId?: string;
   onImageSelect: (imageId: string) => void;
+  // 无限滚动支持
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 interface ThumbnailItemProps {
@@ -80,8 +84,17 @@ function ThumbnailItem({ image, isSelected, onClick }: ThumbnailItemProps) {
   );
 }
 
-export default function ImageThumbnailList({ images, selectedImageId, onImageSelect }: ImageThumbnailListProps) {
+export default function ImageThumbnailList({
+  images,
+  selectedImageId,
+  onImageSelect,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore
+}: ImageThumbnailListProps) {
   const [searchTerm, setSearchTerm] = useState("");
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
 
   // 过滤图片
   const filteredImages = images.filter(image =>
@@ -96,11 +109,36 @@ export default function ImageThumbnailList({ images, selectedImageId, onImageSel
     }
   }, [filteredImages, selectedImageId, onImageSelect]);
 
+  // 无限滚动监听
+  useEffect(() => {
+    if (!onLoadMore) return;
+
+    const container = scrollContainerRef.current;
+    const sentinel = sentinelRef.current;
+    if (!container || !sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          onLoadMore();
+        }
+      },
+      {
+        root: container,
+        threshold: 0.1,
+        rootMargin: "100px"
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, onLoadMore]);
+
   return (
     <div className="flex flex-col h-full bg-transparent">
       {/* 图片网格 */}
       <div className="flex-1 min-h-0">
-        <ScrollArea className="h-full">
+        <ScrollArea scrollerRef={scrollContainerRef} className="h-full">
           <div className="p-4" style={{ containerType: 'inline-size' }}>
         {filteredImages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-foreground-400">
@@ -124,6 +162,14 @@ export default function ImageThumbnailList({ images, selectedImageId, onImageSel
           </div>
         )}
           </div>
+          {/* 无限滚动 sentinel */}
+          {onLoadMore && (
+            <div ref={sentinelRef} className="flex justify-center py-4">
+              {loadingMore && (
+                <CircularProgress size="sm" aria-label="加载中" />
+              )}
+            </div>
+          )}
         </ScrollArea>
       </div>
     </div>

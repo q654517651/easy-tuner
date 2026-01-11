@@ -213,6 +213,9 @@ export default function CreateTask() {
   const [values, setValues] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
 
+  // 图片预览状态（用于 image_upload widget）
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+
   // 仅展示：GPU 列表、数据集列表（有接口则用，无则给占位）
   const [gpus, setGpus] = useState<string[]>(_gpusCache ?? []);
   const [datasets, setDatasets] = useState<DsItem[]>(_datasetsCache ?? []);
@@ -629,6 +632,79 @@ export default function CreateTask() {
     }, 50); // 50ms防抖延迟
   };
 
+  // 图片上传处理函数
+  const handleImageDrop = async (e: React.DragEvent, fieldName: string) => {
+    e.preventDefault();
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+
+    // 前端校验：格式
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!['png', 'jpg', 'jpeg'].includes(ext || '')) {
+      addToast({ type: 'error', message: '只支持 PNG 和 JPG 格式' });
+      return;
+    }
+
+    // 前端校验：大小
+    if (file.size > 10 * 1024 * 1024) {
+      addToast({ type: 'error', message: '文件大小不能超过 10MB' });
+      return;
+    }
+
+    // 上传到后端
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch(
+        `${getApiBaseUrl()}/images/upload/temp-control-image`,
+        { method: 'POST', body: formData }
+      );
+
+      if (!response.ok) {
+        let errorMessage = '上传失败';
+        try {
+          const error = await response.json();
+          errorMessage = error.detail || error.message || `上传失败 (${response.status})`;
+        } catch {
+          // 响应不是 JSON 格式，使用状态文本
+          errorMessage = `上传失败: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const { temp_id } = await response.json();
+
+      // 更新预览（blob）和值（temp_id）
+      setImagePreviews(prev => ({
+        ...prev,
+        [fieldName]: URL.createObjectURL(file)
+      }));
+      setValues(prev => ({ ...prev, [fieldName]: temp_id }));
+
+      addToast({ type: 'success', message: '控制图上传成功' });
+    } catch (err: any) {
+      console.error('上传失败:', err);
+      addToast({ type: 'error', message: err.message || '上传失败' });
+    }
+  };
+
+  const clearImage = (fieldName: string) => {
+    // 释放 blob URL
+    if (imagePreviews[fieldName]) {
+      URL.revokeObjectURL(imagePreviews[fieldName]);
+    }
+
+    setImagePreviews(prev => {
+      const newPreviews = { ...prev };
+      delete newPreviews[fieldName];
+      return newPreviews;
+    });
+
+    setValues(prev => ({ ...prev, [fieldName]: '' }));
+  };
+
   // 字段渲染函数 - 支持后端返回的widget类型
   const renderField = (f: TrainingField) => {
     const label = f.label;
@@ -719,6 +795,50 @@ export default function CreateTask() {
           type="text"
           onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))}
         />
+      );
+    }
+
+    // 图片上传控件
+    if (f.widget === "image_upload") {
+      const previewUrl = imagePreviews[f.name];
+
+      return (
+        <div key={f.name} className="space-y-2">
+          <label className="text-sm font-medium text-foreground">{label}</label>
+
+          {previewUrl ? (
+            // 预览模式
+            <div className="relative inline-block">
+              <img
+                src={previewUrl}
+                alt="控制图预览"
+                className="max-h-48 border-2 border-default-200 rounded-lg shadow-sm"
+              />
+              <Button
+                size="sm"
+                color="danger"
+                className="absolute top-2 right-2"
+                onClick={() => clearImage(f.name)}
+              >
+                移除
+              </Button>
+            </div>
+          ) : (
+            // 拖拽上传区域
+            <div
+              onDrop={(e) => handleImageDrop(e, f.name)}
+              onDragOver={(e) => e.preventDefault()}
+              className="border-2 border-dashed border-default-300 rounded-lg p-8 text-center cursor-pointer hover:border-primary hover:bg-default-50 transition-colors"
+            >
+              <p className="text-default-500">拖拽图片到此处</p>
+              <p className="text-xs text-default-400 mt-2">
+                支持 PNG、JPG 格式，最大 10MB
+              </p>
+            </div>
+          )}
+
+          {f.help && <p className="text-xs text-default-400">{f.help}</p>}
+        </div>
       );
     }
 

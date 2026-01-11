@@ -27,10 +27,25 @@ from .core.training.manager import initialize_training_manager
 from .core.environment import init_environment
 from .utils.logger import log_info, log_warn, log_error
 from .utils.parent_monitor import start_parent_monitor, stop_parent_monitor
+from .services.cleanup_service import cleanup_expired_temp_files
 
 # 获取配置
 settings = get_config()
 logger = logging.getLogger("uvicorn.error")
+
+
+# 定时清理任务（异步）
+async def periodic_cleanup_task():
+    """定时清理过期临时文件（每小时执行一次）"""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # 1小时
+            await asyncio.to_thread(cleanup_expired_temp_files)
+        except asyncio.CancelledError:
+            log_info("定时清理任务已取消")
+            break
+        except Exception as e:
+            log_error(f"定时清理任务执行失败: {e}")
 
 
 @asynccontextmanager
@@ -75,10 +90,22 @@ async def lifespan(app: FastAPI):
     log_info("启动父进程监控...")
     start_parent_monitor(loop)
 
+    # ③ 启动定时清理任务
+    log_info("启动定时清理任务...")
+    cleanup_task = asyncio.create_task(periodic_cleanup_task())
+
     yield
 
     # 关闭时清理
     log_info("🛑 应用关闭中...")
+
+    # 取消定时清理任务
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
     stop_parent_monitor()
     log_info("父进程监控已停止")
 

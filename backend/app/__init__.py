@@ -10,4 +10,4 @@ if sys.platform == 'win32':
     # 使用 ProactorEventLoop 以支持子进程（create_subprocess_exec）
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-__version__ = "2.0.0"
+__version__ = "0.0.2"

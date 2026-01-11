@@ -178,9 +178,9 @@ export const datasetApi = {
   },
 
   // 获取数据集详情
-  async getDataset(id: string): Promise<DatasetDetail | null> {
+  async getDataset(id: string, mediaPage: number = 1, mediaPageSize: number = 100): Promise<DatasetDetail | null> {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/datasets/${id}`);
+      const response = await fetch(`${getApiBaseUrl()}/datasets/${id}?media_page=${mediaPage}&media_page_size=${mediaPageSize}`);
       if (!response.ok) {
         if (response.status === 404) {
           return null;
@@ -656,13 +656,14 @@ export const labelingApi = {
   },
 
   // 单张打标
-  async labelSingle(datasetId: string, filename: string, prompt?: string): Promise<{ filename: string; caption: string }> {
+  async labelSingle(datasetId: string, filename: string, prompt?: string, signal?: AbortSignal): Promise<{ filename: string; caption: string }> {
     const response = await fetch(`${getApiBaseUrl()}/labeling/single`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ dataset_id: datasetId, filename, prompt: prompt || null }),
+      signal,
     });
     if (!response.ok) {
       const text = await response.text();

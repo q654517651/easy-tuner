@@ -107,9 +107,16 @@ class MusubiTrainer:
     @property
     def _PROJECT_ROOT(self) -> Path:
         """
-        获取工作目录根（从环境管理器缓存）
-        ✨ 新架构：workspace-based runtime，所有路径相对于 workspace_root
-        用于设置 Popen 的 cwd，不会写入 CLI 参数。
+        获取项目根目录（resources 目录）
+        用于解析脚本路径：musubi-tuner 位于 project_root/backend/engines/
+        """
+        return self._paths.project_root
+
+    @property
+    def _WORKING_DIR(self) -> Path:
+        """
+        获取工作目录（workspace_root）
+        用于设置 Popen 的 cwd，使相对路径参数（如 dataset.toml）正确解析
         """
         return self._paths.workspace_root
 
@@ -123,13 +130,14 @@ class MusubiTrainer:
     def _scripts_for_task(self, task) -> dict:
         """
         返回：
-          - train: 训练脚本的相对 workspace 根路径（必填）
+          - train: 训练脚本的相对 PROJECT_ROOT 路径（必填）
           - cache_steps: [{name, script, args_template, enabled}]（从模型注册表读取）
         仅使用新的 ModelSpec.cache_steps；不再读取旧的 script_cache_te/latents。
         """
         model_spec = get_model(task.training_type)
-        # ✨ 使用相对于 workspace_root 的路径（因为 cwd 是 workspace_root）
-        base = self._musubi_src.relative_to(self._paths.workspace_root)
+        # ✨ 使用相对于 PROJECT_ROOT 的路径（最终会用 PROJECT_ROOT / 相对路径来构建绝对路径）
+        # musubi-tuner 在新架构中位于 backend/engines/ 下，不再位于 workspace 下
+        base = self._musubi_src.relative_to(self._PROJECT_ROOT)
 
         def resolve(rel: str | None) -> str:
             if not rel:
@@ -540,6 +548,12 @@ class MusubiTrainer:
             if value is not None and str(value).strip() != "":
                 params.extend([cli_flag, str(value).strip()])
 
+        # 添加控制图参数（使用相对路径）
+        control_image = getattr(config, 'sample_control_image', '').strip()
+        if control_image:
+            # 此时 control_image 已经是相对路径（如 "control/sample_control.png"）
+            params.extend(['--ci', control_image])
+
         # 组合提示词和参数
         if params:
             return f"{prompt} {' '.join(params)}"
@@ -565,11 +579,12 @@ class MusubiTrainer:
         - 切到项目根目录
         - 设置必要环境变量
         """
-        # 1) 命令（相对项目根）
+        # 1) 命令（脚本使用绝对路径，参数使用相对于 workspace_root 的相对路径）
         cmd = self._build_training_command(task, dataset_config_rel, training_dir, preview_mode=False)
 
-        # 2) 从脚本目录跳回项目根的相对路径
-        rel_to_root_from_script = os.path.relpath(self._PROJECT_ROOT, training_dir)
+        # 2) 从脚本目录跳回工作目录（workspace_root）的相对路径
+        # bat 脚本需要 cd 到 workspace_root，这样相对路径参数才能正确解析
+        rel_to_root_from_script = os.path.relpath(self._WORKING_DIR, training_dir)
         rel_to_root_win = rel_to_root_from_script.replace("/", "\\")
 
         # 3) PYTHONPATH 指向 musubi 源码目录（使用绝对路径）
@@ -734,7 +749,7 @@ set "PYTHONIOENCODING=utf-8"
                 # 统一由 LogSink 落盘与广播（此处不直接写文件）
                 success = self._network_retry.run_with_retry(
                     command=cache_cmd,
-                    cwd=str(self._PROJECT_ROOT),
+                    cwd=str(self._WORKING_DIR),
                     env=env,
                     log_callback=log_callback,
                     timeout=1800,
@@ -1062,13 +1077,13 @@ set "PYTHONIOENCODING=utf-8"
 
                 # 🔍 调试：打印 PYTHONPATH 确认是否正确设置
                 log_info(f"[环境变量] PYTHONPATH = {current_env.get('PYTHONPATH', '(未设置)')}")
-                log_info(f"[工作目录] cwd = {self._PROJECT_ROOT}")
+                log_info(f"[工作目录] cwd = {self._WORKING_DIR}")
                 log_info(f"[命令] {' '.join(cmd[:5])}...")  # 只打印前5个参数
 
                 # 创建进程
                 self._proc = subprocess.Popen(
                     cmd,
-                    cwd=str(self._PROJECT_ROOT),
+                    cwd=str(self._WORKING_DIR),
                     env=current_env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -1136,17 +1151,19 @@ set "PYTHONIOENCODING=utf-8"
                                 self._proc.kill()
                                 self._proc.wait(timeout=5)
                                 log_info("训练进程已强制终止")
-                        
+
                         # 🔧 关闭输出流，防止管道阻塞
                         if self._proc.stdout and not self._proc.stdout.closed:
                             try:
                                 self._proc.stdout.close()
-                            except:
+                            except (OSError, ValueError) as e:
+                                log_warning(f"关闭 stdout 流失败: {e}")
                                 pass
                         if self._proc.stderr and not self._proc.stderr.closed:
                             try:
                                 self._proc.stderr.close()
-                            except:
+                            except (OSError, ValueError) as e:
+                                log_warning(f"关闭 stderr 流失败: {e}")
                                 pass
                                 
                     except Exception as e:

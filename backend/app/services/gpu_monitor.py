@@ -122,31 +122,36 @@ class GPUMonitor:
                 try:
                     util = pynvml.nvmlDeviceGetUtilizationRates(handle)
                     gpu_utilization = util.gpu
-                except:
+                except pynvml.NVMLError as e:
+                    log_warning(f"获取 GPU {gpu_id} 利用率失败: {e}")
                     gpu_utilization = 0.0
 
                 # 温度
                 try:
                     temperature = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-                except:
+                except pynvml.NVMLError as e:
+                    log_warning(f"获取 GPU {gpu_id} 温度失败: {e}")
                     temperature = 0
 
                 # 功耗信息
                 try:
                     power_draw = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0  # 转换为瓦特
-                except:
+                except pynvml.NVMLError as e:
+                    log_warning(f"获取 GPU {gpu_id} 功耗失败: {e}")
                     power_draw = 0.0
 
                 try:
                     power_limit = pynvml.nvmlDeviceGetPowerManagementLimitConstraints(handle)[1] / 1000.0
-                except:
+                except pynvml.NVMLError as e:
+                    log_warning(f"获取 GPU {gpu_id} 功耗限制失败: {e}")
                     power_limit = 0.0
 
                 # 风扇转速
                 fan_speed = None
                 try:
                     fan_speed = pynvml.nvmlDeviceGetFanSpeed(handle)
-                except:
+                except pynvml.NVMLError as e:
+                    log_warning(f"获取 GPU {gpu_id} 风扇转速失败 (设备可能不支持): {e}")
                     pass
 
                 gpu_metrics = GPUMetrics(

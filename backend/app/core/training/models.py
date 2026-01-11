@@ -273,6 +273,32 @@ class BaseTrainingConfig:
         }
     )
 
+    network_weights: str = field(
+        default="",
+        metadata={
+            "group": ParameterGroup.BASIC.key,
+            "label": "预训练 LoRA 权重",
+            "widget": "file_picker",
+            "help": "从已有 LoRA 权重继续训练（可选）。指定已训练好的 .safetensors 文件路径，将从该权重开始继续训练",
+            "target": "cli",
+            "cli": {"type": "value", "name": "--network_weights", "formatter": "path", "emit_if_empty": False},
+            "persist": True
+        }
+    )
+
+    dim_from_weights: bool = field(
+        default=False,
+        metadata={
+            "group": ParameterGroup.BASIC.key,
+            "label": "从权重自动推断维度",
+            "widget": "checkbox",
+            "help": "启用后将自动从 network_weights 指定的权重文件中读取 LoRA 维度，无需手动设置 network_dim",
+            "target": "cli",
+            "cli": {"type": "toggle_true", "name": "--dim_from_weights"},
+            "persist": True
+        }
+    )
+
     blocks_to_swap: Optional[int] = field(
         default=30,
         metadata={
@@ -531,6 +557,20 @@ class BaseTrainingConfig:
         }
     )
 
+    sample_control_image: str = field(
+        default="",
+        metadata={
+            "group": ParameterGroup.SAMPLING.key,
+            "label": "采样控制图",
+            "widget": "image_upload",
+            "help": "训练采样时的控制图（仅 Qwen Edit / Flux Kontext 支持，可选）",
+            "target": "sample",
+            "enable_if": {"sampling_enabled": True},
+            "ui_hidden": False,
+            "persist": True
+        }
+    )
+
     # ================================
     # 5. 硬件与精度（Hardware & Precision）
     # ================================
@@ -676,244 +716,7 @@ class BaseTrainingConfig:
     )
 
 
-@dataclass
-class QwenImageConfig(BaseTrainingConfig):
-    """Qwen-Image LoRA训练配置"""
 
-    dit_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "DiT 模型路径",
-            "widget": "file_picker",
-            "help": "Qwen-Image DiT模型文件路径",
-            "cli": {"name": "--dit", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    vae_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "VAE 模型路径",
-            "widget": "file_picker",
-            "help": "VAE模型文件路径",
-            "cli": {"name": "--vae", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    text_encoder_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "文本编码器路径",
-            "widget": "file_picker",
-            "help": "文本编码器模型文件路径",
-            "cli": {"name": "--text_encoder", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-
-
-@dataclass
-class QwenImageEdit2509Config(BaseTrainingConfig):
-    """Qwen-Image LoRA训练配置"""
-
-    dit_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "DiT 模型路径",
-            "widget": "file_picker",
-            "help": "Qwen-Image Edit2509模型文件路径",
-            "cli": {"name": "--dit", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    vae_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "VAE 模型路径",
-            "widget": "file_picker",
-            "help": "VAE模型文件路径",
-            "cli": {"name": "--vae", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    text_encoder_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "文本编码器路径",
-            "widget": "file_picker",
-            "help": "文本编码器模型文件路径",
-            "cli": {"name": "--text_encoder", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-
-    edit: bool = field(
-        default=True,
-        metadata={
-            "group": ParameterGroup.PRECISION.key,
-            "label": "2509配置",
-            "widget": "switch",
-            "help": "2509配置",
-            "target": "cli",
-            "cli": {"type": "toggle_true", "name": "--edit_plus", "emit_if_default": False}
-        }
-    )
-
-
-@dataclass
-class FluxKontext(BaseTrainingConfig):
-    dit_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "DiT 模型路径",
-            "widget": "file_picker",
-            "help": "Flux-Kontext DiT模型文件路径",
-            "cli": {"name": "--dit", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    vae_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "VAE 模型路径",
-            "widget": "file_picker",
-            "help": "VAE模型文件路径",
-            "cli": {"name": "--vae", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    text_encoder1_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "文本编码器路径(T5-XXL)",
-            "widget": "file_picker",
-            "help": "T5-XXL文件路径",
-            "cli": {"name": "--text_encoder1", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-
-    text_encoder2_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "文本编码器路径 (CLIP-L)",
-            "widget": "file_picker",
-            "help": "CLIP-L文件路径",
-            "cli": {"name": "--text_encoder2", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-
-
-@dataclass
-class Wan21(BaseTrainingConfig):
-    dit_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "Wan2.1 模型路径",
-            "widget": "file_picker",
-            "help": "Wan2.1 DiT模型文件路径",
-            "cli": {"name": "--dit", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    vae_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "VAE 模型路径",
-            "widget": "file_picker",
-            "help": "VAE模型文件路径",
-            "cli": {"name": "--vae", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    t5_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "T5-XXL 模型路径",
-            "widget": "file_picker",
-            "help": "T5-XXL文件路径",
-            "cli": {"name": "--t5", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-
-    task: str = field(
-        default="t2i-14B",
-        metadata={
-            "group": ParameterGroup.BASIC.key,
-            "label": "优化器",
-            "widget": "dropdown",
-            "options": ["t2v-1.3B", "t2v-14B", "i2v-14B", "t2i-14B"],
-            "help": "wan2.1任务类型选择",
-            "target": "cli",
-            "cli": {"type": "value", "name": "--task", "formatter": "str", "emit_if_default": False}
-        }
-    )
-
-
-
-@dataclass
-class Wan22(BaseTrainingConfig):
-    dit_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "DiT 模型路径",
-            "widget": "file_picker",
-            "help": "wan2.2模型文件路径",
-            "cli": {"name": "--dit", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    vae_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "VAE 模型路径",
-            "widget": "file_picker",
-            "help": "VAE模型文件路径",
-            "cli": {"name": "--vae", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-    t5_path: str = field(
-        default="",
-        metadata={
-            "group": ParameterGroup.PATH.key,
-            "label": "T5-XXL 模型路径",
-            "widget": "file_picker",
-            "help": "T5-XXL文件路径",
-            "cli": {"name": "--t5", "type": "value", "formatter": "path"},
-            "ui_hidden": False, "persist": True
-        }
-    )
-
-    task: str = field(
-        default="t2v-A14B",
-        metadata={
-            "group": ParameterGroup.BASIC.key,
-            "label": "任务类型",
-            "widget": "dropdown",
-            "options": ["t2v-A14B", "i2v-A14B"],
-            "help": "wan2.2任务类型选择",
-            "target": "cli",
-            "cli": {"type": "value", "name": "--task", "formatter": "str", "emit_if_default": False}
-        }
-    )
 
 
 @dataclass
@@ -1087,8 +890,16 @@ def build_cli_args(config: Any, force_emit_all: bool = False) -> List[str]:
             if flag:
                 args.append(flag)
         else:
+            # 普通的 value 类型参数
             flag = cli.get("name")
             if flag:
+                # 检查 emit_if_empty 配置（默认 True）
+                emit_if_empty = cli.get("emit_if_empty", True)
+
+                # 如果不允许空值，且值为空，则跳过
+                if not emit_if_empty and (value is None or value == ""):
+                    continue
+
                 formatter = cli.get("formatter")
                 if formatter == "int":
                     args.extend([flag, str(int(value))])
@@ -1117,12 +928,25 @@ def _parse_resolution_to_list(v: Any) -> List[int]:
     return []
 
 
+def _parse_list_int(x: Any) -> List[int]:
+    """
+    严格解析整数列表，仅接受 list 类型
+    用于 TOML array 格式，如 [1, 25, 45]
+    """
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return [int(i) for i in x]
+    raise ValueError(f"list_int 期望 list[int] 类型，但收到: {x!r}")
+
+
 _FORMATTERS = {
     "int": lambda x: None if x in (None, "") else int(x),
     "float": lambda x: None if x in (None, "") else float(x),
     "bool": lambda x: bool(x) if not isinstance(x, str) else x.lower() in ("1", "true", "yes"),
     "str": lambda x: None if x is None else str(x),
     "res_array": _parse_resolution_to_list,  # e.g. "1024,1024" -> [1024, 1024]
+    "list_int": _parse_list_int,  # e.g. [1, 25, 45] -> [1, 25, 45] (TOML array)
     # 可按需扩展更多 formatter
 }
 
@@ -1249,213 +1073,13 @@ def dumps_toml(t: Dict[str, Any]) -> str:
 
 
 # ================================
-# 自动注册已知模型
+# 自动注册所有模型
 # ================================
+#
+# 模型定义已迁移到 models_registry/ 目录
+# 导入 models_registry 模块会自动触发所有模型的注册
+#
+# 新增模型方法：在 models_registry/ 目录下创建新的 .py 文件即可，
+# 无需修改此文件
 
-
-# 注册 Qwen-Image LoRA 模型
-register_model(ModelSpec(
-    type_name="qwen_image_lora",
-    title="Qwen-Image LoRA",
-    config_cls=QwenImageConfig,
-    script_train="qwen_image_train_network.py",
-    network_module="musubi_tuner.networks.lora_qwen_image",
-    group_order=[
-        ParameterGroup.PATH.key,
-        ParameterGroup.BASIC.key,
-        ParameterGroup.OPTIMIZER.key,
-        ParameterGroup.PRECISION.key,
-        ParameterGroup.SAMPLING.key,
-        ParameterGroup.SAVING.key,
-        ParameterGroup.ADVANCED.key,
-    ],
-    path_mapping={
-        "dit_path": "model_paths.qwen_image.dit_path",
-        "vae_path": "model_paths.qwen_image.vae_path",
-        "text_encoder_path": "model_paths.qwen_image.text_encoder_path"
-    },
-    cache_steps=[
-        CacheStep(
-            name="cache_text_encoder_outputs",
-            script="qwen_image_cache_text_encoder_outputs.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--text_encoder", "{text_encoder_path}",
-                           "--batch_size", "1"]
-        ),
-        CacheStep(
-            name="cache_latents",
-            script="qwen_image_cache_latents.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--vae", "{vae_path}"]
-        ),
-    ],
-    features={},
-    supported_dataset_types=[DatasetType.IMAGE]
-))
-
-register_model(ModelSpec(
-    type_name="qwen_image_edit2095_lora",
-    title="Qwen-Image Edit 2095 LoRA",
-    config_cls=QwenImageEdit2509Config,
-    script_train="qwen_image_train_network.py",
-    network_module="musubi_tuner.networks.lora_qwen_image",
-    group_order=[
-        ParameterGroup.PATH.key,
-        ParameterGroup.BASIC.key,
-        ParameterGroup.OPTIMIZER.key,
-        ParameterGroup.PRECISION.key,
-        ParameterGroup.SAMPLING.key,
-        ParameterGroup.SAVING.key,
-        ParameterGroup.ADVANCED.key,
-    ],
-    path_mapping={
-        "dit_path": "model_paths.qwen_image_edit.dit_path",
-        "vae_path": "model_paths.qwen_image_edit.vae_path",
-        "text_encoder_path": "model_paths.qwen_image_edit.text_encoder_path"
-    },
-    cache_steps=[
-        CacheStep(
-            name="cache_text_encoder_outputs",
-            script="qwen_image_cache_text_encoder_outputs.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--text_encoder", "{text_encoder_path}",
-                           "--edit_plus",
-                           "--batch_size", "1"]
-        ),
-        CacheStep(
-            name="cache_latents",
-            script="qwen_image_cache_latents.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--edit_plus",
-                           "--vae", "{vae_path}"]
-        ),
-    ],
-    features={},
-    supported_dataset_types=[DatasetType.IMAGE, DatasetType.SINGLE_CONTROL_IMAGE, DatasetType.MULTI_CONTROL_IMAGE]
-))
-
-register_model(ModelSpec(
-    type_name="flux_kontext_lora",
-    title="Flux Kontext LoRA",
-    config_cls=FluxKontext,
-    script_train="qwen_image_train_network.py",
-    network_module="musubi_tuner.networks.lora_flux",
-    group_order=[
-        ParameterGroup.PATH.key,
-        ParameterGroup.BASIC.key,
-        ParameterGroup.OPTIMIZER.key,
-        ParameterGroup.PRECISION.key,
-        ParameterGroup.SAMPLING.key,
-        ParameterGroup.SAVING.key,
-        ParameterGroup.ADVANCED.key,
-    ],
-    path_mapping={
-        "dit_path": "model_paths.flux_kontext.dit_path",
-        "vae_path": "model_paths.flux_kontext.vae_path",
-        "text_encoder1_path": "model_paths.flux_kontext.text_encoder1_path",
-        "text_encoder2_path": "model_paths.flux_kontext.text_encoder2_path"
-    },
-    cache_steps=[
-        CacheStep(
-            name="cache_text_encoder_outputs",
-            script="flux_kontext_cache_text_encoder_outputs.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--text_encoder1", "{text_encoder1_path}",
-                           "--text_encoder2", "{text_encoder2_path}",
-                           "--batch_size", "16",
-                           "--logging_dir", "{cache_logs_dir}"]
-        ),
-        CacheStep(
-            name="cache_latents",
-            script="flux_kontext_cache_latents.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--vae", "{vae_path}",
-                           "--logging_dir", "{cache_logs_dir}"]
-        ),
-    ],
-    features={},
-    supported_dataset_types=[DatasetType.IMAGE, DatasetType.SINGLE_CONTROL_IMAGE]
-))
-
-register_model(ModelSpec(
-    type_name="Wan_2_1",
-    title="Wan2.1",
-    config_cls=Wan21,
-    script_train="wan_train_network.py",
-    network_module="musubi_tuner.networks.lora_wan",
-    group_order=[
-        ParameterGroup.PATH.key,
-        ParameterGroup.BASIC.key,
-        ParameterGroup.OPTIMIZER.key,
-        ParameterGroup.PRECISION.key,
-        ParameterGroup.SAMPLING.key,
-        ParameterGroup.SAVING.key,
-        ParameterGroup.ADVANCED.key,
-    ],
-    path_mapping={
-        "dit_path": "model_paths.Wan_2_1.dit_path",
-        "vae_path": "model_paths.Wan_2_1.vae_path",
-        "t5_path": "model_paths.Wan_2_1.t5_path",
-    },
-    cache_steps=[
-        CacheStep(
-            name="cache_text_encoder_outputs",
-            script="wan_cache_text_encoder_outputs.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--t5", "{t5_path}",
-                           "--batch_size", "16",
-                           "--logging_dir", "{cache_logs_dir}"]
-        ),
-        CacheStep(
-            name="cache_latents",
-            script="wan_cache_latents.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--vae", "{vae_path}",
-                           "--logging_dir", "{cache_logs_dir}"]
-        ),
-    ],
-    features={},
-    supported_dataset_types=[DatasetType.IMAGE, DatasetType.VIDEO]
-))
-
-
-register_model(ModelSpec(
-    type_name="Wan_2_2",
-    title="Wan2.2",
-    config_cls=Wan22,
-    script_train="wan_train_network.py",
-    network_module="musubi_tuner.networks.lora_wan",
-    group_order=[
-        ParameterGroup.PATH.key,
-        ParameterGroup.BASIC.key,
-        ParameterGroup.OPTIMIZER.key,
-        ParameterGroup.PRECISION.key,
-        ParameterGroup.SAMPLING.key,
-        ParameterGroup.SAVING.key,
-        ParameterGroup.ADVANCED.key,
-    ],
-    path_mapping={
-        "dit_path": "model_paths.Wan_2_2.dit_path",
-        "vae_path": "model_paths.Wan_2_2.vae_path",
-        "t5_path": "model_paths.Wan_2_2.t5_path",
-    },
-    cache_steps=[
-        CacheStep(
-            name="cache_text_encoder_outputs",
-            script="wan_cache_text_encoder_outputs.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--t5", "{t5_path}",
-                           "--batch_size", "16",
-                           "--logging_dir", "{cache_logs_dir}"]
-        ),
-        CacheStep(
-            name="cache_latents",
-            script="wan_cache_latents.py",
-            args_template=["--dataset_config", "{dataset_toml}",
-                           "--vae", "{vae_path}",
-                           "--logging_dir", "{cache_logs_dir}"]
-        ),
-    ],
-    features={},
-    supported_dataset_types=[DatasetType.IMAGE, DatasetType.VIDEO]
-))
+from . import models_registry  # noqa: F401 (导入用于触发副作用)

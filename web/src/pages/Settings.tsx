@@ -27,26 +27,10 @@ import { getNestedValue as getNestedValueUtil, setNestedValue as setNestedValueU
 // 类型定义
 // ============================
 
+// Musubi 配置类型（简化后，仅保留基本信息）
 interface MusubiConfig {
-  git_repository: string;
-  git_branch: string;
-  installation_path: string;
-  status: "installed" | "not_found" | "error" | "updating";
-  version: string;
-  last_check: string;
-  commit_hash?: string;
-  commit_date?: string;
-  branch?: string;
+  status: "installed" | "not_found" | "error";
   message?: string;
-}
-
-interface MusubiRelease {
-  tag: string;
-  version: string;
-  commit_hash: string;
-  date: string;
-  message: string;
-  description: string;
 }
 
 interface ModelPaths {
@@ -111,8 +95,6 @@ function StatusBadge({ status }: { status: string }) {
         return { color: "bg-red-100 text-red-800", text: "未安装" };
       case "error":
         return { color: "bg-red-100 text-red-800", text: "错误" };
-      case "updating":
-        return { color: "bg-blue-100 text-blue-800", text: "更新中" };
       default:
         return { color: "bg-gray-100 text-gray-800", text: "未知" };
     }
@@ -143,11 +125,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [releases, setReleases] = useState<MusubiRelease[]>([]);
-  const [releasesLoading, setReleasesLoading] = useState(false);
   const [modelPathsSchema, setModelPathsSchema] = useState<ModelPathsSchema | null>(null);
-  const [fixingEnvironment, setFixingEnvironment] = useState(false);
-  const [fixingTrainer, setFixingTrainer] = useState(false);
   const [showRuntimeModal, setShowRuntimeModal] = useState(false);
   const [showWorkspaceModal, setShowWorkspaceModal] = useState(false);
   const [workspacePath, setWorkspacePath] = useState<string>("");
@@ -212,144 +190,6 @@ export default function SettingsPage() {
       setLoading(false);
     }
   };
-
-  // 切换到指定版本
-  const switchToVersion = async (release: MusubiRelease) => {
-    try {
-      const result = await postJson<any>("/settings/musubi/switch-version", {
-        version: release.version,
-        commit_hash: release.commit_hash,
-      });
-      if (result.success) {
-        addToast({
-          title: "切换成功",
-          description: `已切换到版本 ${release.version}`,
-          color: "success",
-          timeout: 3000
-        });
-
-        // 重新加载设置以更新状态
-        loadSettings();
-      } else {
-        throw new Error(result.message || "切换版本失败");
-      }
-    } catch (err) {
-      addToast({
-        title: "切换失败",
-        description: err instanceof Error ? err.message : "切换版本失败",
-        color: "danger",
-        timeout: 3000
-      });
-    }
-  };
-
-  // 加载Musubi发布历史
-  const loadMusubiReleases = async (forceRefresh: boolean = false) => {
-    try {
-      setReleasesLoading(true);
-      const result = await fetchJson<any>(`/settings/musubi/releases?limit=10&force_refresh=${Boolean(forceRefresh)}`);
-
-      if (result.success) {
-        setReleases(result.data || []);
-        if (forceRefresh) {
-          addToast({
-            title: "刷新成功",
-            description: "发布历史已刷新",
-            color: "success",
-            timeout: 3000
-          });
-        }
-      }
-    } catch (err) {
-      console.error("加载发布历史失败:", err);
-      addToast({
-        title: "加载失败",
-        description: "加载发布历史失败",
-        color: "danger",
-        timeout: 3000
-      });
-    } finally {
-      setReleasesLoading(false);
-    }
-  };
-
-  // 修复训练环境
-  const fixEnvironment = async () => {
-    try {
-      setFixingEnvironment(true);
-      addToast({
-        title: "开始修复",
-        description: "正在修复训练环境，这可能需要几分钟时间...",
-        color: "primary",
-        timeout: 3000
-      });
-
-      // 获取当前应用语言对应的locale
-      const locale = getLocaleString();
-
-      const result = await postJson<any>("/settings/musubi/fix-environment", { locale });
-      if (result.success) {
-        addToast({
-          title: "修复成功",
-          description: result.message || "训练环境修复成功",
-          color: "success",
-          timeout: 5000
-        });
-        // 重新加载设置以更新状态
-        loadSettings();
-      } else {
-        throw new Error(result.message || "修复失败");
-      }
-    } catch (err) {
-      addToast({
-        title: "修复失败",
-        description: err instanceof Error ? err.message : "训练环境修复失败",
-        color: "danger",
-        timeout: 5000
-      });
-    } finally {
-      setFixingEnvironment(false);
-    }
-  };
-
-  // 修复训练器安装
-  const fixTrainerInstallation = async () => {
-    try {
-      setFixingTrainer(true);
-      addToast({
-        title: "开始修复",
-        description: "正在更新训练器到最新版本...",
-        color: "primary",
-        timeout: 3000
-      });
-
-      const result = await postJson<any>("/settings/musubi/fix-installation");
-      if (result.success) {
-        addToast({
-          title: "修复成功",
-          description: result.message || "训练器更新成功",
-          color: "success",
-          timeout: 5000
-        });
-        // 重新加载设置和发布历史
-        loadSettings();
-        loadMusubiReleases(true);
-      } else {
-        throw new Error(result.message || "修复失败");
-      }
-    } catch (err) {
-      addToast({
-        title: "修复失败",
-        description: err instanceof Error ? err.message : "训练器更新失败",
-        color: "danger",
-        timeout: 5000
-      });
-    } finally {
-      setFixingTrainer(false);
-    }
-  };
-
-
   // 使用统一的工具函数（从 utils/object.ts 导入）
   const getNestedValue = (obj: any, path: string): string => {
     return getNestedValueUtil(obj, path, "");
@@ -399,8 +239,6 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSettings();
     loadModelPathsSchema();
-    // 初始加载时也获取发布历史
-    loadMusubiReleases();
   }, []);
 
   // 初始化获取当前工作区路径
@@ -450,134 +288,27 @@ export default function SettingsPage() {
         {activeTab === "后端状态" && (
           <div className="h-full flex flex-col space-y-6">
             <GroupCard
-              title="Musubi 训练器配置"
+              title="训练环境"
               headerContent={
-                <div className="flex gap-2">
-                  <Button
-                    color="warning"
-                    variant="light"
-                    size="sm"
-                    onPress={() => setShowRuntimeModal(true)}
-                    isLoading={false}
-                    disabled={fixingTrainer}
-                  >
-                    安装/修复训练环境
-                  </Button>
-                  <Button
-                    color="primary"
-                    variant="light"
-                    size="sm"
-                    onPress={fixTrainerInstallation}
-                    isLoading={fixingTrainer}
-                    disabled={fixingEnvironment || fixingTrainer}
-                  >
-                    {fixingTrainer ? "更新训练器中..." : "更新训练器"}
-                  </Button>
-                </div>
+                <Button
+                  color="warning"
+                  variant="light"
+                  size="sm"
+                  onPress={() => setShowRuntimeModal(true)}
+                  isLoading={false}
+                >
+                  安装/修复训练环境
+                </Button>
               }
             >
-              <HeroInput
-                label="Git 仓库地址"
-                value={settings.musubi.git_repository}
-                isDisabled
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    musubi: { ...settings.musubi, git_repository: String(value) },
-                  })
-                }
-              />
-              <HeroInput
-                label="分支"
-                value={settings.musubi.git_branch}
-                isDisabled
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    musubi: { ...settings.musubi, git_branch: String(value) },
-                  })
-                }
-              />
-              <HeroInput
-                label="安装位置"
-                value={settings.musubi.installation_path}
-                isDisabled
-                onChange={(value) =>
-                  updateSettings({
-                    ...settings,
-                    musubi: { ...settings.musubi, installation_path: String(value) },
-                  })
-                }
-              />
-              <HeroInput
-                label="当前版本"
-                value={settings.musubi.version && settings.musubi.version !== '' ? settings.musubi.version : '未安装'}
-                isDisabled
-                onChange={() => {}}
-              />
-            </GroupCard>
-
-            <div className="flex-1 min-h-0">
-              <GroupCard
-                title="发布历史"
-                headerContent={
-                  <Button
-                    size="sm"
-                    variant="bordered"
-                    onPress={() => loadMusubiReleases(true)}
-                    isLoading={releasesLoading}
-                    disabled={releasesLoading}
-                  >
-                    检查更新
-                  </Button>
-                }
-              >
-                <div className="md:col-span-2 h-full flex flex-col min-h-0">
-                  {releasesLoading ? (
-                    <div className="flex items-center justify-center py-4">
-                      <Spinner size="sm" color="primary" />
-                      <span className="ml-2 text-sm text-gray-600 dark:text-gray-300">加载中...</span>
-                    </div>
-                  ) : releases.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      <p>暂无发布历史</p>
-                      <p className="text-xs mt-1">点击"检查更新"按钮获取最新信息</p>
-                    </div>
-                  ) : (
-                    <div className="flex-1 overflow-y-auto space-y-3">
-                      {releases.map((release, index) => (
-                        <div
-                          key={index}
-                          className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex px-2 py-1 rounded-md bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs font-medium">
-                                {release.version}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                {new Date(release.date).toLocaleDateString()}
-                              </span>
-                              <button
-                                onClick={() => switchToVersion(release)}
-                                className="px-3 py-1 text-xs bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800 rounded-md transition-colors"
-                              >
-                                切换
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-                            {release.description || release.message || "无更新说明"}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              <div className="md:col-span-2">
+                <div className="text-sm text-gray-600 dark:text-gray-300">
+                  训练器已作为应用内置组件打包，无需额外安装。
+                  <br />
+                  如果遇到训练环境问题，可以点击上方按钮重新安装或修复环境。
                 </div>
-              </GroupCard>
-            </div>
+              </div>
+            </GroupCard>
           </div>
         )}
 
